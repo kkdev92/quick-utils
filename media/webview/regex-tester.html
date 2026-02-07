@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="{{raw:csp}}">
+  <link href="{{webviewUri:media/webview/regex-tester.css}}" rel="stylesheet">
+  <title>Regex Tester</title>
+</head>
+<body>
+  <div class="container">
+    <h1>Regex Tester</h1>
+
+    <div class="input-group">
+      <label for="pattern">Regular Expression</label>
+      <div class="pattern-input">
+        <span class="delimiter">/</span>
+        <input type="text" id="pattern" placeholder="pattern" autocomplete="off">
+        <span class="delimiter">/</span>
+        <input type="text" id="flags" placeholder="gi" maxlength="6" autocomplete="off">
+      </div>
+    </div>
+
+    <div class="input-group">
+      <label for="input">Test String</label>
+      <textarea id="input" placeholder="Enter text to test against the regular expression..." rows="6"></textarea>
+    </div>
+
+    <div class="results-section">
+      <div class="results-header">
+        <h2>Results</h2>
+        <span id="matchCount" class="match-count" style="display: none;"></span>
+      </div>
+      <div id="error" class="error" style="display: none;"></div>
+      <div id="highlighted" class="highlighted-text" style="display: none;"></div>
+      <div id="results" class="results"></div>
+      <div id="noMatch" class="no-match" style="display: none;">No matches found</div>
+    </div>
+
+    <details class="info-section">
+      <summary>Quick Reference</summary>
+      <div class="reference-grid">
+        <div class="reference-item"><code>.</code> Any character</div>
+        <div class="reference-item"><code>\d</code> Digit [0-9]</div>
+        <div class="reference-item"><code>\w</code> Word [a-zA-Z0-9_]</div>
+        <div class="reference-item"><code>\s</code> Whitespace</div>
+        <div class="reference-item"><code>^</code> Start of string</div>
+        <div class="reference-item"><code>$</code> End of string</div>
+        <div class="reference-item"><code>*</code> 0 or more</div>
+        <div class="reference-item"><code>+</code> 1 or more</div>
+        <div class="reference-item"><code>?</code> 0 or 1</div>
+        <div class="reference-item"><code>{n}</code> Exactly n</div>
+        <div class="reference-item"><code>[abc]</code> Character set</div>
+        <div class="reference-item"><code>(a|b)</code> Alternation</div>
+      </div>
+      <h4>Flags</h4>
+      <div class="reference-grid">
+        <div class="reference-item"><code>g</code> Global</div>
+        <div class="reference-item"><code>i</code> Case-insensitive</div>
+        <div class="reference-item"><code>m</code> Multiline</div>
+        <div class="reference-item"><code>s</code> Dotall</div>
+      </div>
+    </details>
+  </div>
+
+  <script nonce="{{raw:nonce}}" src="{{webviewUri:media/webview/regex-tester.js}}"></script>
+</body>
+</html>

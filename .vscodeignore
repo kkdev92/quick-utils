@@ -1,0 +1,55 @@
+# Source files
+src/**
+test/**
+tsconfig.json
+
+# Development files
+.vscode/**
+.github/**
+.claude/**
+work/**
+
+# Build artifacts
+node_modules/**
+*.vsix
+
+# Documentation (keep README, LICENSE, CHANGELOG)
+CONTRIBUTING.md
+SECURITY.md
+CODE_OF_CONDUCT.md
+
+# Config files
+.gitignore
+esbuild.mjs
+.eslintrc*
+eslint.config.*
+.prettierrc*
+vitest.config.*
+
+# tsc output (bundled by esbuild)
+dist/**/*.d.ts
+dist/**/*.d.ts.map
+dist/**/*.js.map
+dist/commands/**
+dist/providers/**
+dist/services/**
+dist/utils/**
+dist/webview/**
+
+# Secrets / Environment
+.env
+.env.*
+.mcp.json
+credentials*
+*.secret
+*.key
+*.pem
+
+# Screenshots
+.clipshot/**
+
+# Other
+*.log
+*.tmp
+.DS_Store
+Thumbs.db

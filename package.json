@@ -1,0 +1,252 @@
+{
+  "name": "quick-utils",
+  "displayName": "Quick Utils",
+  "description": "Text transformation, code generation, and utility tools",
+  "version": "0.1.0",
+  "publisher": "kkdev92",
+  "author": {
+    "name": "kkdev92",
+    "url": "https://github.com/kkdev92"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/kkdev92/quick-utils#readme",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Other",
+    "Formatters"
+  ],
+  "keywords": [
+    "text",
+    "transform",
+    "json",
+    "regex",
+    "uuid"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kkdev92/quick-utils"
+  },
+  "bugs": {
+    "url": "https://github.com/kkdev92/quick-utils/issues"
+  },
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
+  "activationEvents": [
+    "onView:quickUtils.toolsList",
+    "onView:quickUtils.history"
+  ],
+  "main": "./dist/extension.js",
+  "l10n": "./l10n",
+  "contributes": {
+    "commands": [
+      {
+        "command": "quickUtils.transformText",
+        "title": "Quick Utils: Transform Text"
+      },
+      {
+        "command": "quickUtils.toUpperCase",
+        "title": "Quick Utils: To Upper Case"
+      },
+      {
+        "command": "quickUtils.toLowerCase",
+        "title": "Quick Utils: To Lower Case"
+      },
+      {
+        "command": "quickUtils.toCamelCase",
+        "title": "Quick Utils: To camelCase"
+      },
+      {
+        "command": "quickUtils.toSnakeCase",
+        "title": "Quick Utils: To snake_case"
+      },
+      {
+        "command": "quickUtils.toKebabCase",
+        "title": "Quick Utils: To kebab-case"
+      },
+      {
+        "command": "quickUtils.toPascalCase",
+        "title": "Quick Utils: To PascalCase"
+      },
+      {
+        "command": "quickUtils.base64Encode",
+        "title": "Quick Utils: Base64 Encode"
+      },
+      {
+        "command": "quickUtils.base64Decode",
+        "title": "Quick Utils: Base64 Decode"
+      },
+      {
+        "command": "quickUtils.urlEncode",
+        "title": "Quick Utils: URL Encode"
+      },
+      {
+        "command": "quickUtils.urlDecode",
+        "title": "Quick Utils: URL Decode"
+      },
+      {
+        "command": "quickUtils.formatJson",
+        "title": "Quick Utils: Format JSON"
+      },
+      {
+        "command": "quickUtils.minifyJson",
+        "title": "Quick Utils: Minify JSON"
+      },
+      {
+        "command": "quickUtils.generateUuid",
+        "title": "Quick Utils: Generate UUID"
+      },
+      {
+        "command": "quickUtils.generateLoremIpsum",
+        "title": "Quick Utils: Generate Lorem Ipsum"
+      },
+      {
+        "command": "quickUtils.insertDate",
+        "title": "Quick Utils: Insert Date"
+      },
+      {
+        "command": "quickUtils.openRegexTester",
+        "title": "Quick Utils: Open Regex Tester"
+      },
+      {
+        "command": "quickUtils.clearHistory",
+        "title": "Quick Utils: Clear History"
+      },
+      {
+        "command": "quickUtils.setApiKey",
+        "title": "Quick Utils: Set API Key"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "quickUtilsView",
+          "title": "Quick Utils",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "quickUtilsView": [
+        {
+          "id": "quickUtils.toolsList",
+          "name": "Tools"
+        },
+        {
+          "id": "quickUtils.history",
+          "name": "History"
+        }
+      ]
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "submenu": "quickUtils.submenu",
+          "group": "quickUtils"
+        }
+      ],
+      "quickUtils.submenu": [
+        {
+          "command": "quickUtils.transformText"
+        },
+        {
+          "command": "quickUtils.formatJson"
+        },
+        {
+          "command": "quickUtils.generateUuid"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "quickUtils.clearHistory",
+          "when": "view == quickUtils.history"
+        }
+      ]
+    },
+    "submenus": [
+      {
+        "id": "quickUtils.submenu",
+        "label": "Quick Utils"
+      }
+    ],
+    "configuration": {
+      "title": "Quick Utils",
+      "properties": {
+        "quickUtils.logLevel": {
+          "type": "string",
+          "enum": [
+            "trace",
+            "debug",
+            "info",
+            "warn",
+            "error",
+            "silent"
+          ],
+          "default": "info",
+          "description": "Log level for Quick Utils"
+        },
+        "quickUtils.dateFormat": {
+          "type": "string",
+          "default": "YYYY-MM-DD",
+          "description": "Default date format for Insert Date command"
+        },
+        "quickUtils.historySize": {
+          "type": "number",
+          "default": 50,
+          "minimum": 0,
+          "maximum": 500,
+          "description": "Maximum history entries to keep"
+        },
+        "quickUtils.autoRetry": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto retry failed API calls"
+        }
+      }
+    },
+    "keybindings": [
+      {
+        "command": "quickUtils.transformText",
+        "key": "ctrl+shift+t",
+        "mac": "cmd+shift+t",
+        "when": "editorTextFocus"
+      }
+    ]
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true,
+      "description": "This extension works in untrusted workspaces with full functionality"
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run bundle:prod",
+    "compile": "tsc -p ./",
+    "bundle": "node esbuild.mjs",
+    "bundle:prod": "node esbuild.mjs --production",
+    "bundle:watch": "node esbuild.mjs --watch",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src",
+    "test": "vitest run",
+    "package": "vsce package --no-dependencies",
+    "publish": "vsce publish"
+  },
+  "dependencies": {
+    "@kkdev92/vscode-ext-kit": "^0.2.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@types/node": "^25.2.1",
+    "@types/vscode": "^1.96.0",
+    "@vscode/vsce": "^3.7.1",
+    "esbuild": "^0.27.3",
+    "eslint": "^9.0.0",
+    "typescript": "^5.4.0",
+    "typescript-eslint": "^8.54.0",
+    "vitest": "^4.0.18"
+  }
+}
