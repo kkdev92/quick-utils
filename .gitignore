@@ -37,6 +37,7 @@ kubeconfig*
 # ===== Node.js =====
 node_modules/
 dist/
+artifacts/
 out/
 *.vsix
 .npm/
