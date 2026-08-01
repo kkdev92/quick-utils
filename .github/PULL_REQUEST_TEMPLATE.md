@@ -21,11 +21,16 @@ Fixes #(issue number)
 ## Checklist
 
 - [ ] I have read the [CONTRIBUTING](../CONTRIBUTING.md) guidelines
-- [ ] My code follows the project's coding standards
-- [ ] I have added tests that prove my fix/feature works
-- [ ] All new and existing tests pass (`npm run test`)
-- [ ] Linting passes (`npm run lint`)
-- [ ] I have updated documentation if needed
+- [ ] `npm run lint` and `npm run typecheck` pass
+- [ ] `npm test` passes (unit + integration against the built bundles)
+- [ ] `npm run test:coverage` still meets its thresholds
+- [ ] `npm run check:l10n` passes — new strings are in `l10n/bundle.l10n.json`
+      and translated in `l10n/bundle.l10n.ja.json`; manifest strings are in both
+      `package.nls*.json`
+- [ ] `npm run package && npm run verify:vsix` passes
+- [ ] README / CHANGELOG updated if behaviour changed
+- [ ] `THIRD_PARTY_NOTICES.md` and `third-party/` updated if a bundled
+      dependency changed
 
 ## Screenshots (if applicable)
 

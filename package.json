@@ -1,8 +1,8 @@
 {
   "name": "quick-utils",
   "displayName": "Quick Utils",
-  "description": "Text transformation, code generation, and utility tools",
-  "version": "0.1.0",
+  "description": "%extension.description%",
+  "version": "0.2.0",
   "publisher": "kkdev92",
   "author": {
     "name": "kkdev92",
@@ -10,20 +10,6 @@
   },
   "license": "MIT",
   "homepage": "https://github.com/kkdev92/quick-utils#readme",
-  "engines": {
-    "vscode": "^1.96.0"
-  },
-  "categories": [
-    "Other",
-    "Formatters"
-  ],
-  "keywords": [
-    "text",
-    "transform",
-    "json",
-    "regex",
-    "uuid"
-  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/kkdev92/quick-utils"
@@ -31,146 +17,398 @@
   "bugs": {
     "url": "https://github.com/kkdev92/quick-utils/issues"
   },
+  "engines": {
+    "vscode": "^1.125.0",
+    "node": ">=22.12.0"
+  },
+  "categories": [
+    "Formatters",
+    "Other"
+  ],
+  "keywords": [
+    "case",
+    "base64",
+    "json",
+    "regex",
+    "uuid",
+    "hash",
+    "hmac",
+    "offline"
+  ],
   "icon": "media/icon.png",
   "galleryBanner": {
-    "color": "#1e1e1e",
+    "color": "#1b1b1b",
     "theme": "dark"
   },
-  "activationEvents": [
-    "onView:quickUtils.toolsList",
-    "onView:quickUtils.history"
-  ],
   "main": "./dist/extension.js",
   "l10n": "./l10n",
+  "activationEvents": [
+    "onWebviewPanel:quickUtils.regexTester"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true,
+      "description": "Text is transformed in memory. The extension reads no workspace files unless you pick one, spawns no processes other than its own regex worker, and makes no network requests."
+    },
+    "virtualWorkspaces": true
+  },
   "contributes": {
     "commands": [
       {
-        "command": "quickUtils.transformText",
-        "title": "Quick Utils: Transform Text"
+        "command": "quickUtils.transform",
+        "title": "%command.transform.title%",
+        "category": "Quick Utils"
       },
       {
-        "command": "quickUtils.toUpperCase",
-        "title": "Quick Utils: To Upper Case"
+        "command": "quickUtils.transformAgain",
+        "title": "%command.transformAgain.title%",
+        "category": "Quick Utils"
       },
       {
-        "command": "quickUtils.toLowerCase",
-        "title": "Quick Utils: To Lower Case"
+        "command": "quickUtils.transformClipboard",
+        "title": "%command.transformClipboard.title%",
+        "category": "Quick Utils"
       },
       {
-        "command": "quickUtils.toCamelCase",
-        "title": "Quick Utils: To camelCase"
+        "command": "quickUtils.transformPipeline",
+        "title": "%command.transformPipeline.title%",
+        "category": "Quick Utils"
       },
       {
-        "command": "quickUtils.toSnakeCase",
-        "title": "Quick Utils: To snake_case"
+        "command": "quickUtils.replaceMatches",
+        "title": "%command.replaceMatches.title%",
+        "category": "Quick Utils"
       },
       {
-        "command": "quickUtils.toKebabCase",
-        "title": "Quick Utils: To kebab-case"
+        "command": "quickUtils.extractMatches",
+        "title": "%command.extractMatches.title%",
+        "category": "Quick Utils"
       },
       {
-        "command": "quickUtils.toPascalCase",
-        "title": "Quick Utils: To PascalCase"
+        "command": "quickUtils.upperCase",
+        "title": "%command.upperCase.title%",
+        "category": "Quick Utils"
+      },
+      {
+        "command": "quickUtils.lowerCase",
+        "title": "%command.lowerCase.title%",
+        "category": "Quick Utils"
+      },
+      {
+        "command": "quickUtils.camelCase",
+        "title": "%command.camelCase.title%",
+        "category": "Quick Utils"
+      },
+      {
+        "command": "quickUtils.pascalCase",
+        "title": "%command.pascalCase.title%",
+        "category": "Quick Utils"
+      },
+      {
+        "command": "quickUtils.snakeCase",
+        "title": "%command.snakeCase.title%",
+        "category": "Quick Utils"
+      },
+      {
+        "command": "quickUtils.kebabCase",
+        "title": "%command.kebabCase.title%",
+        "category": "Quick Utils"
+      },
+      {
+        "command": "quickUtils.constantCase",
+        "title": "%command.constantCase.title%",
+        "category": "Quick Utils"
+      },
+      {
+        "command": "quickUtils.titleCase",
+        "title": "%command.titleCase.title%",
+        "category": "Quick Utils"
       },
       {
         "command": "quickUtils.base64Encode",
-        "title": "Quick Utils: Base64 Encode"
+        "title": "%command.base64Encode.title%",
+        "category": "Quick Utils"
       },
       {
         "command": "quickUtils.base64Decode",
-        "title": "Quick Utils: Base64 Decode"
+        "title": "%command.base64Decode.title%",
+        "category": "Quick Utils"
       },
       {
         "command": "quickUtils.urlEncode",
-        "title": "Quick Utils: URL Encode"
+        "title": "%command.urlEncode.title%",
+        "category": "Quick Utils"
       },
       {
         "command": "quickUtils.urlDecode",
-        "title": "Quick Utils: URL Decode"
+        "title": "%command.urlDecode.title%",
+        "category": "Quick Utils"
       },
       {
-        "command": "quickUtils.formatJson",
-        "title": "Quick Utils: Format JSON"
+        "command": "quickUtils.sortLines",
+        "title": "%command.sortLines.title%",
+        "category": "Quick Utils"
       },
       {
-        "command": "quickUtils.minifyJson",
-        "title": "Quick Utils: Minify JSON"
+        "command": "quickUtils.dedupeLines",
+        "title": "%command.dedupeLines.title%",
+        "category": "Quick Utils"
+      },
+      {
+        "command": "quickUtils.jsonFormat",
+        "title": "%command.jsonFormat.title%",
+        "category": "Quick Utils"
+      },
+      {
+        "command": "quickUtils.jsonMinify",
+        "title": "%command.jsonMinify.title%",
+        "category": "Quick Utils"
+      },
+      {
+        "command": "quickUtils.jsonSortKeys",
+        "title": "%command.jsonSortKeys.title%",
+        "category": "Quick Utils"
       },
       {
         "command": "quickUtils.generateUuid",
-        "title": "Quick Utils: Generate UUID"
+        "title": "%command.generateUuid.title%",
+        "category": "Quick Utils"
       },
       {
-        "command": "quickUtils.generateLoremIpsum",
-        "title": "Quick Utils: Generate Lorem Ipsum"
+        "command": "quickUtils.generateUuidV7",
+        "title": "%command.generateUuidV7.title%",
+        "category": "Quick Utils"
+      },
+      {
+        "command": "quickUtils.generatePassword",
+        "title": "%command.generatePassword.title%",
+        "category": "Quick Utils"
+      },
+      {
+        "command": "quickUtils.generateLorem",
+        "title": "%command.generateLorem.title%",
+        "category": "Quick Utils"
       },
       {
         "command": "quickUtils.insertDate",
-        "title": "Quick Utils: Insert Date"
+        "title": "%command.insertDate.title%",
+        "category": "Quick Utils"
+      },
+      {
+        "command": "quickUtils.convertTimestamp",
+        "title": "%command.convertTimestamp.title%",
+        "category": "Quick Utils"
+      },
+      {
+        "command": "quickUtils.hash",
+        "title": "%command.hash.title%",
+        "category": "Quick Utils"
+      },
+      {
+        "command": "quickUtils.hmac",
+        "title": "%command.hmac.title%",
+        "category": "Quick Utils"
+      },
+      {
+        "command": "quickUtils.hmacDefault",
+        "title": "%command.hmacDefault.title%",
+        "category": "Quick Utils"
+      },
+      {
+        "command": "quickUtils.manageSecrets",
+        "title": "%command.manageSecrets.title%",
+        "category": "Quick Utils"
+      },
+      {
+        "command": "quickUtils.setDefaultSecret",
+        "title": "%command.setDefaultSecret.title%",
+        "category": "Quick Utils"
+      },
+      {
+        "command": "quickUtils.inspect",
+        "title": "%command.inspect.title%",
+        "category": "Quick Utils"
       },
       {
         "command": "quickUtils.openRegexTester",
-        "title": "Quick Utils: Open Regex Tester"
+        "title": "%command.openRegexTester.title%",
+        "category": "Quick Utils"
       },
       {
-        "command": "quickUtils.clearHistory",
-        "title": "Quick Utils: Clear History"
+        "command": "quickUtils.reportState",
+        "title": "%command.reportState.title%",
+        "category": "Quick Utils"
       },
       {
-        "command": "quickUtils.setApiKey",
-        "title": "Quick Utils: Set API Key"
+        "command": "quickUtils.collectDiagnostics",
+        "title": "%command.collectDiagnostics.title%",
+        "category": "Quick Utils"
+      },
+      {
+        "command": "quickUtils.inspectDocument",
+        "title": "%command.inspectDocument.title%",
+        "category": "Quick Utils"
+      },
+      {
+        "command": "quickUtils.history.clear",
+        "title": "%command.history.clear.title%",
+        "category": "Quick Utils",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "quickUtils.history.copy",
+        "title": "%command.history.copy.title%",
+        "category": "Quick Utils",
+        "icon": "$(clippy)"
+      },
+      {
+        "command": "quickUtils.history.reapply",
+        "title": "%command.history.reapply.title%",
+        "category": "Quick Utils",
+        "icon": "$(redo)"
+      },
+      {
+        "command": "quickUtils.history.loadMore",
+        "title": "%command.history.loadMore.title%",
+        "category": "Quick Utils"
+      },
+      {
+        "command": "quickUtils.tools.resetFavorites",
+        "title": "%command.tools.resetFavorites.title%",
+        "category": "Quick Utils",
+        "icon": "$(star-empty)"
       }
     ],
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "quickUtilsView",
+          "id": "quickUtils",
           "title": "Quick Utils",
           "icon": "media/icon.svg"
         }
       ]
     },
     "views": {
-      "quickUtilsView": [
+      "quickUtils": [
         {
-          "id": "quickUtils.toolsList",
-          "name": "Tools"
+          "id": "quickUtils.tools",
+          "name": "%view.tools.name%",
+          "icon": "media/icon.svg"
         },
         {
           "id": "quickUtils.history",
-          "name": "History"
+          "name": "%view.history.name%",
+          "icon": "media/icon.svg"
+        },
+        {
+          "id": "quickUtils.scratchpad",
+          "name": "%view.scratchpad.name%",
+          "type": "webview",
+          "icon": "media/icon.svg",
+          "visibility": "collapsed"
         }
       ]
     },
-    "menus": {
-      "editor/context": [
-        {
-          "submenu": "quickUtils.submenu",
-          "group": "quickUtils"
-        }
-      ],
-      "quickUtils.submenu": [
-        {
-          "command": "quickUtils.transformText"
-        },
-        {
-          "command": "quickUtils.formatJson"
-        },
-        {
-          "command": "quickUtils.generateUuid"
-        }
-      ],
-      "view/item/context": [
-        {
-          "command": "quickUtils.clearHistory",
-          "when": "view == quickUtils.history"
-        }
-      ]
-    },
+    "viewsWelcome": [
+      {
+        "view": "quickUtils.history",
+        "contents": "%view.history.welcome%"
+      }
+    ],
     "submenus": [
       {
         "id": "quickUtils.submenu",
         "label": "Quick Utils"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "submenu": "quickUtils.submenu",
+          "group": "1_modification@100"
+        }
+      ],
+      "quickUtils.submenu": [
+        {
+          "command": "quickUtils.transform",
+          "group": "1_transform@1"
+        },
+        {
+          "command": "quickUtils.transformAgain",
+          "group": "1_transform@2"
+        },
+        {
+          "command": "quickUtils.transformPipeline",
+          "group": "1_transform@3"
+        },
+        {
+          "command": "quickUtils.replaceMatches",
+          "group": "2_pattern@1"
+        },
+        {
+          "command": "quickUtils.hash",
+          "group": "3_inspect@1"
+        },
+        {
+          "command": "quickUtils.inspect",
+          "group": "3_inspect@2"
+        },
+        {
+          "command": "quickUtils.extractMatches",
+          "group": "2_pattern@2"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "quickUtils.tools.resetFavorites",
+          "when": "view == quickUtils.tools",
+          "group": "navigation@1"
+        },
+        {
+          "command": "quickUtils.history.clear",
+          "when": "view == quickUtils.history",
+          "group": "navigation@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "quickUtils.history.reapply",
+          "when": "view == quickUtils.history && viewItem =~ /^historyEntry/",
+          "group": "inline@1"
+        },
+        {
+          "command": "quickUtils.history.copy",
+          "when": "view == quickUtils.history && viewItem == historyEntryWithOutput",
+          "group": "inline@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "quickUtils.history.copy",
+          "when": "false"
+        },
+        {
+          "command": "quickUtils.history.reapply",
+          "when": "false"
+        },
+        {
+          "command": "quickUtils.history.loadMore",
+          "when": "false"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "quickUtils.transform",
+        "key": "ctrl+alt+t",
+        "mac": "cmd+alt+t",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "quickUtils.transformAgain",
+        "key": "ctrl+alt+shift+t",
+        "mac": "cmd+alt+shift+t",
+        "when": "editorTextFocus"
       }
     ],
     "configuration": {
@@ -183,70 +421,143 @@
             "debug",
             "info",
             "warn",
-            "error",
-            "silent"
+            "error"
           ],
           "default": "info",
-          "description": "Log level for Quick Utils"
+          "description": "%config.logLevel.description%"
         },
-        "quickUtils.dateFormat": {
+        "quickUtils.datePatterns": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": [
+            "YYYY-MM-DD",
+            "YYYY-MM-DD HH:mm:ss",
+            "YYYY-MM-DD[T]HH:mm:ssZ",
+            "YYYY/MM/DD",
+            "MM/DD/YYYY",
+            "DD/MM/YYYY",
+            "HH:mm:ss",
+            "YYYYMMDD"
+          ],
+          "description": "%config.datePatterns.description%"
+        },
+        "quickUtils.jsonIndent": {
           "type": "string",
-          "default": "YYYY-MM-DD",
-          "description": "Default date format for Insert Date command"
+          "enum": [
+            "editor",
+            "2",
+            "4",
+            "tab"
+          ],
+          "enumDescriptions": [
+            "%config.jsonIndent.editor%",
+            "%config.jsonIndent.two%",
+            "%config.jsonIndent.four%",
+            "%config.jsonIndent.tab%"
+          ],
+          "default": "editor",
+          "description": "%config.jsonIndent.description%"
         },
         "quickUtils.historySize": {
           "type": "number",
-          "default": 50,
           "minimum": 0,
-          "maximum": 500,
-          "description": "Maximum history entries to keep"
+          "maximum": 1000,
+          "default": 100,
+          "description": "%config.historySize.description%"
         },
-        "quickUtils.autoRetry": {
+        "quickUtils.historyPageSize": {
+          "type": "number",
+          "minimum": 10,
+          "maximum": 500,
+          "default": 50,
+          "description": "%config.historyPageSize.description%"
+        },
+        "quickUtils.hashAlgorithm": {
+          "type": "string",
+          "enum": [
+            "sha256",
+            "sha512",
+            "sha384",
+            "sha1",
+            "md5"
+          ],
+          "default": "sha256",
+          "description": "%config.hashAlgorithm.description%"
+        },
+        "quickUtils.hmacKeyEncoding": {
+          "type": "string",
+          "enum": [
+            "utf8",
+            "hex",
+            "base64"
+          ],
+          "enumDescriptions": [
+            "%config.hmacKeyEncoding.utf8%",
+            "%config.hmacKeyEncoding.hex%",
+            "%config.hmacKeyEncoding.base64%"
+          ],
+          "default": "utf8",
+          "description": "%config.hmacKeyEncoding.description%"
+        },
+        "quickUtils.passwordLength": {
+          "type": "number",
+          "minimum": 8,
+          "maximum": 128,
+          "default": 20,
+          "description": "%config.passwordLength.description%"
+        },
+        "quickUtils.regexTimeoutMs": {
+          "type": "number",
+          "minimum": 100,
+          "maximum": 60000,
+          "default": 2000,
+          "description": "%config.regexTimeoutMs.description%"
+        },
+        "quickUtils.showStatusBar": {
           "type": "boolean",
           "default": true,
-          "description": "Auto retry failed API calls"
+          "description": "%config.showStatusBar.description%"
         }
       }
-    },
-    "keybindings": [
-      {
-        "command": "quickUtils.transformText",
-        "key": "ctrl+shift+t",
-        "mac": "cmd+shift+t",
-        "when": "editorTextFocus"
-      }
-    ]
-  },
-  "capabilities": {
-    "untrustedWorkspaces": {
-      "supported": true,
-      "description": "This extension works in untrusted workspaces with full functionality"
     }
   },
   "scripts": {
     "vscode:prepublish": "npm run bundle:prod",
-    "compile": "tsc -p ./",
-    "bundle": "node esbuild.mjs",
-    "bundle:prod": "node esbuild.mjs --production",
-    "bundle:watch": "node esbuild.mjs --watch",
-    "watch": "tsc -watch -p ./",
+    "bundle": "node scripts/build.mjs",
+    "bundle:prod": "node scripts/build.mjs --production",
+    "bundle:watch": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit && tsc -p src/webview --noEmit",
     "lint": "eslint src",
-    "test": "vitest run",
-    "package": "vsce package --no-dependencies",
-    "publish": "vsce publish"
+    "lint:fix": "eslint src --fix",
+    "check:l10n": "node scripts/l10n.mjs",
+    "l10n:write": "node scripts/l10n.mjs --write",
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "npm run bundle && vitest run --project integration",
+    "test:coverage": "vitest run --project unit --coverage",
+    "package": "vsce package --no-dependencies --out quick-utils.vsix",
+    "verify:vsix": "node scripts/verify-vsix.mjs",
+    "install-local": "npm run package && code --install-extension quick-utils.vsix --force",
+    "uninstall-local": "code --uninstall-extension kkdev92.quick-utils",
+    "clean": "rimraf dist coverage .vsix-verify-temp quick-utils.vsix"
   },
   "dependencies": {
-    "@kkdev92/vscode-ext-kit": "^0.3.1"
+    "@kkdev92/vscode-ext-kit": "^2.1.0"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.2",
-    "@types/node": "^25.2.1",
-    "@types/vscode": "^1.96.0",
-    "@vscode/vsce": "^3.7.1",
-    "esbuild": "^0.27.3",
-    "eslint": "^9.0.0",
-    "typescript": "^5.4.0",
-    "typescript-eslint": "^8.54.0",
-    "vitest": "^4.0.18"
+    "@eslint/js": "^10.0.0",
+    "@types/node": "^22.0.0",
+    "@types/vscode": "~1.125.0",
+    "@vitest/coverage-v8": "^4.1.10",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.1",
+    "eslint": "^10.8.0",
+    "rimraf": "^6.1.3",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.65.0",
+    "vitest": "^4.1.10"
   }
 }

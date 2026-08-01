@@ -46,9 +46,15 @@ out/
 
 # ===== Testing =====
 coverage/
+.vsix-verify-temp/
 
 # ===== IDE =====
-.vscode/
+# The launch/build tasks are part of the contributor setup and are committed;
+# everything else under .vscode/ is personal.
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/extensions.json
 .idea/
 *.swp
 *.swo
