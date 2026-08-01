@@ -1,0 +1,23 @@
+{
+  // The page scripts compile against DOM globals and must not see the node or
+  // vscode type worlds — the reverse of the root tsconfig, which excludes this
+  // directory. ESLint's project service discovers this file by walking up from
+  // each source file, which is why it sits here rather than at the root.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "noEmit": true
+  },
+  "include": ["./**/*.ts", "./**/*.d.ts"]
+}

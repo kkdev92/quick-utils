@@ -1,190 +1,140 @@
-# Contributing to quick-utils
+# Contributing to Quick Utils
 
-Thank you for your interest in contributing! This document provides guidelines for contributing to this project.
+Thanks for taking the time to contribute! This document covers the development setup, project layout and expectations for changes.
 
 ## Code of Conduct
 
-Please be respectful and constructive in all interactions.
+This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md). By participating you agree to uphold it.
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js 20.x or later
-- npm 10.x or later
-- VS Code 1.96.0 or later
-- Git
+- Node.js ≥ 22.12 (matches `engines.node`, which follows the kit's floor, and CI)
+- VS Code ≥ 1.125 (the floor `@kkdev92/vscode-ext-kit` 2.0 requires)
+- Nothing else — no Java, no Docker, no service credentials
 
 ### Development Setup
 
-1. Fork and clone the repository:
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/quick-utils.git
-   cd quick-utils
-   ```
+```bash
+git clone https://github.com/kkdev92/quick-utils
+cd quick-utils
+npm install
+npm run bundle
+```
 
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-3. Compile the extension:
-   ```bash
-   npm run compile
-   ```
-
-4. Open in VS Code:
-   ```bash
-   code .
-   ```
-
-5. Press `F5` to launch the Extension Development Host
+Open the folder in VS Code and press `F5`. An Extension Development Host starts with `sample.md` open. `npm run bundle:watch` rebuilds on save.
 
 ## Project Structure
 
-```
+```text
 src/
-├── extension.ts              # Entry point (activate / deactivate)
-├── commands/
-│   ├── index.ts              # Command registration & handler map
-│   ├── textTransform.ts      # Text transformation commands
-│   ├── jsonTools.ts          # JSON format / minify commands
-│   ├── codeGenerate.ts       # UUID, Lorem Ipsum, Date insertion
-│   └── apiTools.ts           # API key management & history clear
-├── providers/
-│   ├── toolsTreeProvider.ts  # Tools list TreeView (SimpleTreeDataProvider)
-│   └── historyTreeProvider.ts # History TreeView (BaseTreeDataProvider)
-├── services/
-│   ├── settingsService.ts    # Typed settings management
-│   ├── historyService.ts     # Operation history (GlobalStorage)
-│   └── apiService.ts         # API calls with retry & SecretStorage
-├── utils/
-│   ├── transformers.ts       # Pure transform functions
-│   └── validators.ts         # Input validation utilities
-└── webview/
-    └── regexTester.ts        # Regex Tester WebView panel
-
-media/
-├── icon.svg                  # Activity Bar icon
-└── webview/
-    ├── regex-tester.html     # WebView HTML template
-    ├── regex-tester.css      # WebView styles
-    └── regex-tester.js       # WebView client-side script
-
-l10n/
-├── bundle.l10n.json          # English strings
-└── bundle.l10n.ja.json       # Japanese strings
-
+├── lib/             pure logic — case, codecs, hashes, JSON, generators,
+│                    date patterns, line operations, regex matching.
+│                    No `vscode` import, no kit import: this is the layer
+│                    the unit tests hit directly.
+├── core/            constants, the config schema, the transform registry,
+│                    the `translatable` marker. Host values arrive as thunks
+│                    so the registry stays vscode-free too.
+├── features/        VS Code-facing adapters: one file per feature area,
+│                    each turning lib results into edits, pickers and views
+├── regex/           the regex worker: protocol, worker entry, host client
+├── webview/         the page scripts: RPC schemas shared with features/, and
+│                    the TypeScript sources bundled to dist/webview/. Their own
+│                    tsconfig — DOM globals, no node/vscode — lives here too.
+└── extension.ts     wiring only: vscode + the kit + the above
+scripts/
+├── build.mjs        esbuild — two entry points, kit version baked in
+├── verify-vsix.mjs  VSIX contents + packaged-worker smoke test
+└── l10n.mjs         extract/check the message bundles
+media/webview/   the static assets: the tester's HTML template and both
+                 stylesheets. The page *scripts* are built from src/webview/;
+                 the kit's webview-client is bundled into them
 test/
-├── transformers.test.ts      # Transformer unit tests
-└── validators.test.ts        # Validator unit tests
+├── unit/            vitest against src/ — no build, no extension host
+├── integration/     vitest against dist/ — real worker thread, real bundle
+└── vscode.ts        the `vscode` module for tests, from the kit's mock kit
 ```
+
+Three constraints worth knowing before you change things:
+
+1. **`src/lib` must not import `vscode` or the kit.** That is what lets the unit
+   tests run in milliseconds with no mock, and it is where almost all the logic
+   lives. If a lib function needs a setting, take it as an argument.
+2. **Regular expressions must stay in the worker.** `RegExp.exec` cannot be
+   interrupted from the thread running it, so evaluating a user-supplied pattern
+   on the extension host would make a hung editor a one-keystroke mistake.
+3. **Compute every output before applying any edit.** A transform that throws
+   halfway through a multi-selection edit leaves the document inconsistent; the
+   feature layer computes all outputs first and only then edits.
 
 ## Development Workflow
 
+```bash
+npm run lint          # eslint (type-checked rules)
+npm run typecheck     # tsc --noEmit twice: the host/test project, then src/webview (DOM)
+npm run test:unit     # fast, no build required
+npm run test:coverage # unit tests with coverage thresholds
+npm test              # bundle + unit + integration
+npm run check:l10n    # every source string is in the bundles, in both languages
+npm run package       # build the VSIX
+npm run verify:vsix   # unpack the VSIX and run the packaged worker
+```
+
+All of these must pass before a PR is merged; CI runs the same steps on Linux, macOS and Windows.
+
 ### Making Changes
 
-1. Create a feature branch:
-   ```bash
-   git checkout -b feature/your-feature-name
-   ```
+- **Adding a transform** means one entry in `src/core/transforms.ts` and one row
+  in the table in `test/unit/transforms.test.ts`. Ids are persisted in history
+  and in "Apply Again", so a *rename* needs a migration, not just an edit — the
+  id list is pinned by a test to make that deliberate.
+- **Adding a command** means `src/core/constants.ts`, `package.json`, and a
+  handler in `src/extension.ts`. `Record<PlainCommandId, …>` there is derived by
+  exclusion, so a command with no handler fails to compile, and
+  `test/unit/manifest.test.ts` catches the manifest side.
+- **Adding a setting** means the schema in `src/core/config.ts` and
+  `contributes.configuration`. The kit's `checkPackageJsonSync` runs at
+  activation and in a test, so a mismatch is reported either way.
+- **User-facing strings** go through `l10n.t()` with an English default. A string
+  declared in a table and translated elsewhere (transform labels, tool
+  categories) must be wrapped in `translatable()` from `src/core/i18n.ts`,
+  otherwise the extractor cannot see it. Then run `npm run l10n:write` and
+  translate the new keys in `l10n/bundle.l10n.ja.json`. Manifest strings live in
+  `package.nls*.json`.
+- **New behaviour needs a test.** Pure logic → `test/unit/`; anything that needs
+  the built bundles or a real worker thread → `test/integration/`.
 
-2. Make your changes
+### Working on the kit alongside this extension
 
-3. Run linting:
-   ```bash
-   npm run lint
-   ```
+Quick Utils is where `@kkdev92/vscode-ext-kit` gets exercised before a release
+goes out to the other extensions that use it. If you are changing the kit:
 
-4. Run tests:
-   ```bash
-   npm run test
-   ```
-
-5. Compile:
-   ```bash
-   npm run compile
-   ```
-
-6. Package (optional, to verify VSIX builds):
-   ```bash
-   npm run package
-   ```
+- Nearly every runtime export of the kit is exercised somewhere here, which is
+  what makes this a useful place to try a kit change before it goes out
+- `test/vscode.ts` is built on the kit's own `createVSCodeMock`, so a gap in the
+  mock shows up here as a test failure rather than as a surprise in production
+- `test/integration/extension.test.ts` activates the real bundle against that
+  mock, which is the closest thing to a smoke test for the kit's wiring
 
 ### Commit Messages
 
-Follow conventional commit format:
-- `feat: add new feature`
-- `fix: fix bug in X`
-- `docs: update documentation`
-- `refactor: restructure X`
-- `test: add tests for X`
-- `chore: update dependencies`
+Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `docs:`, `test:`, `chore:`, `refactor:`.
 
 ### Pull Requests
 
-1. Ensure all tests pass
-2. Update documentation if needed
-3. Add a clear description of changes
-4. Reference any related issues
-
-## Coding Standards
-
-### TypeScript
-
-- Use strict TypeScript (`strict: true`)
-- ESM imports with `.js` extension for relative paths (the project uses `"type": "module"`)
-- Prefer explicit types over inference for function parameters and return types
-- Use `readonly` for immutable properties
-- Avoid `any` — use `unknown` if type is truly unknown
-
-### vscode-ext-kit
-
-This extension uses `@kkdev92/vscode-ext-kit` extensively. When adding features:
-
-- Use kit APIs when available (e.g. `createWebViewPanel`, `createTreeView`, `createFileWatcher`)
-- Use `t()` from the kit for all user-facing strings (localization)
-- Use `safeExecute` / `registerCommands` with `wrapWithSafeExecute` for error-safe command execution
-- Use kit's `Logger` instead of `console.log`
-
-### Security
-
-- Never hardcode secrets — use `createSecretStorage` from the kit
-- Always validate user input before transformation (see `src/utils/validators.ts`)
-- Use CSP with nonce for WebView panels (`generateCSP`)
-
-### Error Handling
-
-- Show user-friendly messages with `showError` / `showInfo`
-- Log technical details for debugging with `logger.warn` / `logger.debug`
-- Use `showWithActions` when the user can take a follow-up action (e.g. undo)
-
-### Testing
-
-- Write unit tests for all new utility functions
-- Include both positive and negative test cases
-- Test edge cases and error conditions
-- Tests use Vitest — run with `npm run test`
+- One logical change per PR.
+- Describe what changed and why; link related issues.
+- Update README / CHANGELOG when behaviour changes.
+- If you add, remove or upgrade a dependency that ships inside the VSIX, update
+  [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and `third-party/` to match.
 
 ## Reporting Issues
 
-When reporting issues, please include:
+Use the issue templates. Run **Quick Utils: Report State** and attach its output — it lists your settings, where each came from, and what the extension has stored, which is usually the difference between a one-round-trip issue and a five-round-trip one. It reports secret *names* only, never values.
 
-- VS Code version
-- Extension version
-- Operating system and version
-- Steps to reproduce
-- Expected vs actual behavior
-- Any error messages from the Output panel (`View > Output > Quick Utils`)
-
-## Feature Requests
-
-Feature requests are welcome! Please:
-
-1. Check existing issues first
-2. Describe the use case
-3. Explain why it would be valuable
+For security reports, **do not open a public issue** — see [SECURITY.md](SECURITY.md).
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+By contributing you agree that your contributions are licensed under the [MIT License](LICENSE).

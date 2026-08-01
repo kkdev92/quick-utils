@@ -1,56 +1,40 @@
-# Source files
+# Sources are bundled into dist/; ship only the bundles and runtime assets.
 src/**
 test/**
-tsconfig.json
+scripts/**
+node_modules/**
+coverage/**
+work/**
+artifacts/**
+.clipshot/**
+.vsix-verify-temp/**
 
-# Development files
+# Development configuration
 .vscode/**
 .github/**
 .claude/**
-work/**
+.gitignore
+.mcp.json
+tsconfig.json
+eslint.config.mjs
+vitest.config.mts
+package-lock.json
 
-# Build artifacts
-node_modules/**
-artifacts/**
-*.vsix
+# Environment and secrets — never ship these, whatever else changes here
+.env
+.env.*
+*.pem
+*.key
 
-# Documentation (keep README, LICENSE, CHANGELOG)
+# Docs that live on GitHub, not in the package (README/LICENSE/CHANGELOG ship
+# automatically). THIRD_PARTY_NOTICES.md and third-party/ must NOT be added
+# here: the MIT licence of the code bundled into dist/ requires its notice to
+# travel with the VSIX.
 CONTRIBUTING.md
 SECURITY.md
 CODE_OF_CONDUCT.md
+sample.md
 
-# Config files
-.gitignore
-esbuild.mjs
-.eslintrc*
-eslint.config.*
-.prettierrc*
-vitest.config.*
-
-# tsc output (bundled by esbuild)
-dist/**/*.d.ts
-dist/**/*.d.ts.map
-dist/**/*.js.map
-dist/commands/**
-dist/providers/**
-dist/services/**
-dist/utils/**
-dist/webview/**
-
-# Secrets / Environment
-.env
-.env.*
-.mcp.json
-credentials*
-*.secret
-*.key
-*.pem
-
-# Screenshots
-.clipshot/**
-
-# Other
-*.log
-*.tmp
-.DS_Store
-Thumbs.db
+# Build noise
+**/*.map
+*.vsix

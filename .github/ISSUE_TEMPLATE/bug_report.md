@@ -1,17 +1,28 @@
 ---
 name: Bug Report
-about: Report a bug to help improve quick-utils
+about: Report a bug to help improve Quick Utils
 title: '[Bug] '
 labels: bug
 assignees: ''
 ---
 
-## Environment
+## State report
 
-- **OS**: (e.g., Windows 11, macOS 15, Ubuntu 24.04)
-- **VS Code Version**: (e.g., 1.96.0)
-- **quick-utils Version**: (e.g., 0.1.0)
-- **Language**: (e.g., English, Japanese)
+Run **Quick Utils: Report State** from the Command Palette and paste the result
+here. It lists your OS, VS Code version, extension version, display language,
+every `quickUtils.*` setting with where its value came from, and what the
+extension has stored — which is usually everything needed to reproduce.
+
+It reports the *names* of any stored secrets and never their values.
+
+<details>
+<summary>State report</summary>
+
+```markdown
+
+```
+
+</details>
 
 ## Description
 
@@ -31,10 +42,18 @@ What you expected to happen.
 
 What actually happened.
 
-## Screenshots / Logs
+## Input
 
-If applicable, add screenshots or error messages from the Output panel (`View > Output > Quick Utils`).
+The smallest text or pattern that reproduces it. For a transform, the exact
+selection; for the regex tester, the pattern, flags and subject.
+
+## Logs
+
+Set `quickUtils.logLevel` to `debug`, reproduce, then paste *View → Output →
+Quick Utils*. Note that the Output panel has its own level selector, which
+applies on top of the setting.
 
 ## Additional Context
 
-Any other relevant information (e.g., relevant `quickUtils.*` settings).
+Anything else relevant — screenshots, a screen recording, other extensions that
+might be involved.

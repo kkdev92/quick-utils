@@ -6,15 +6,18 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -22,6 +25,14 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Fails if a source string is missing from the message bundle, or missing a
+      # Japanese translation — both invisible when running in English.
+      - name: Check localisation bundles
+        run: npm run check:l10n
 
   test:
     needs: lint
@@ -31,42 +42,47 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests
-        run: npm run test
+      - name: Unit tests with coverage
+        run: npm run test:coverage
 
-  build:
+      # Builds the bundles, then runs real patterns through dist/regex-worker.js
+      # in a real worker thread.
+      - name: Integration tests
+        run: npm run test:integration
+
+  package:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Bundle
-        run: npm run bundle:prod
-
       - name: Package extension
-        run: npx @vscode/vsce package --no-dependencies
+        run: npx @vscode/vsce package --no-dependencies --out quick-utils.vsix
+
+      - name: Verify VSIX contents and run the packaged worker
+        run: node scripts/verify-vsix.mjs quick-utils.vsix
 
       - name: Upload VSIX artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: quick-utils-vsix
-          path: "*.vsix"
-          retention-days: 30
+          path: '*.vsix'
+          retention-days: 7
