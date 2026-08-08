@@ -28,6 +28,17 @@ import type { Logger } from '@kkdev92/vscode-ext-kit';
  * ```
  */
 export async function loadPresets(store: PresetStore, logger: Logger): Promise<void> {
+  // Presets are the one thing here that reads a workspace file without being
+  // asked to — a hosted service loads them at activation and a watcher reloads
+  // them. In an untrusted window that is content from a repository the user has
+  // told VS Code they do not trust, so it is not read at all. This extension
+  // declares `untrustedWorkspaces.supported`, and it can only keep saying so
+  // because of this check.
+  if (!vscode.workspace.isTrusted) {
+    store.clear();
+    return;
+  }
+
   const folder = vscode.workspace.workspaceFolders?.[0];
   if (folder === undefined) {
     store.clear();

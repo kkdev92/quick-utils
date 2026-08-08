@@ -296,6 +296,10 @@ const quickUtils = defineModule('quickUtils', { uses }, (module): undefined => {
   module.hostedServices.add({
     id: 'quickUtils.presetLoad',
     inject: { reload: PresetReload },
+    // An untrusted window reads no preset file at all (see `presetLoader.ts`),
+    // and granting trust afterwards does not reload the window. Reacting to
+    // `onDidGrantWorkspaceTrust` would be the tidy answer; the reload command
+    // covers it in the meantime, which is the case it was written for.
     start: async (_context, { reload }) => {
       await reload();
     },

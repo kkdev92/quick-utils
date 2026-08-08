@@ -48,7 +48,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": true,
-      "description": "Text is transformed in memory. The extension reads no workspace files unless you pick one, spawns no processes other than its own regex worker, and makes no network requests."
+      "description": "Text is transformed in memory. The extension reads no workspace files unless you pick one — including the shared snippet file, which an untrusted workspace is not read for at all. It spawns no processes other than its own regex worker, and makes no network requests."
     },
     "virtualWorkspaces": true
   },

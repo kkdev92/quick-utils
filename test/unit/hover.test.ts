@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { readToken } from '../../src/features/hover';
+import { fenceFor, readToken } from '../../src/features/hover';
 import type { LocalizationService } from '@kkdev92/vscode-ext-kit';
 
 /** Just enough of the service to label a reading. */
@@ -74,5 +74,28 @@ describe('readToken', () => {
     for (const token of ['getUserById', 'quick-utils', 'README']) {
       expect(read(token)).toBeUndefined();
     }
+  });
+});
+
+describe('fenceFor', () => {
+  it('uses the ordinary fence when the value has no backticks', () => {
+    expect(fenceFor('plain text')).toBe('```');
+  });
+
+  it('outgrows the longest run of backticks in the value', () => {
+    // The decoded value is whatever was in the file. A run as long as the fence
+    // would close the block, and everything after it would render as markdown.
+    expect(fenceFor('a ``` b')).toBe('````');
+    expect(fenceFor('a ````` b')).toBe('``````');
+  });
+
+  it('leaves a decoded payload unable to escape its block', () => {
+    // The shape that motivated this: a token decoding to a closing fence
+    // followed by a link. Rendered inside a fence it cannot close, it is text.
+    const payload = ['```', '[click me](https://example.invalid)', '```'].join('\n');
+    const fence = fenceFor(payload);
+    const rendered = [fence, payload, fence].join('\n');
+
+    expect(rendered.indexOf(fence, fence.length)).toBe(rendered.length - fence.length);
   });
 });

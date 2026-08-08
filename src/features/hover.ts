@@ -119,6 +119,22 @@ export function readToken(token: string, l10n: LocalizationService): Reading {
 }
 
 /**
+ * A fence long enough that `text` cannot close it.
+ *
+ * CommonMark ends a fenced block at the first fence *at least as long* as the
+ * one that opened it, so three backticks are only safe for content that has
+ * none. This content is a decoded blob out of whatever file is open — a token
+ * that decodes to ``` closes the block early and everything after it renders as
+ * markdown. `isTrusted` is left false, so that stops short of running a
+ * `command:` link, but it still lets a file put arbitrary formatting and links
+ * in a hover, which is not what a hover over a hex dump should be able to do.
+ */
+export function fenceFor(text: string): string {
+  const longest = [...text.matchAll(/`+/gu)].reduce((max, [run]) => Math.max(max, run.length), 0);
+  return '`'.repeat(Math.max(3, longest + 1));
+}
+
+/**
  * Registers the hover provider.
  *
  * `{ scheme: '*' }` rather than a language list: what matters is the shape of
@@ -145,7 +161,11 @@ export function registerDecodeHover(l10n: LocalizationService, logger: Logger): 
         content.appendMarkdown(`**${reading.kind}**\n\n`);
         // A fenced block, not inline markdown: this is arbitrary text out of
         // the user's document, and a MarkdownString renders what it is given.
-        content.appendCodeblock(reading.value);
+        // `appendCodeblock` is not used because it always writes exactly three
+        // backticks and escapes nothing, so the value can close the block it is
+        // supposed to be inside. `fenceFor` picks one it cannot close.
+        const fence = fenceFor(reading.value);
+        content.appendMarkdown(`${fence}\n${reading.value}\n${fence}`);
         return new vscode.Hover(content, range);
       },
     }
