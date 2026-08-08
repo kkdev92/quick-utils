@@ -47,6 +47,9 @@ out/
 # ===== Testing =====
 coverage/
 .vsix-verify-temp/
+# The Extension Host lane downloads a VS Code build here (~200MB) and writes a
+# scratch profile into it. VSCODE_TEST_CACHE can point it somewhere shared.
+.vscode-test/
 
 # ===== IDE =====
 # The launch/build tasks are part of the contributor setup and are committed;

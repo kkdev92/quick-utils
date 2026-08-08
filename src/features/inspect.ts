@@ -4,28 +4,46 @@
  * Both are passive: they never change the document, and they stay out of the
  * way when there is nothing to say — an empty selection hides the status bar
  * item rather than showing zeros.
+ *
+ * The two indicators are *declared* (see `src/extension.ts`), so the host
+ * creates them at activation and disposes them at shutdown. This module only
+ * decides what they say.
  */
 
 import * as vscode from 'vscode';
 import {
-  createLanguageStatusItem,
-  createStatusBarItem,
   debounce,
-  formatNumber,
-  getLanguage,
+  defineLanguageStatusItem,
+  defineStatusBarItem,
   getOrCreateCached,
-  isLanguage,
-  l10n,
-  plural,
-  resolveOffsetsBatch,
-  showInfo,
+  type ActiveEditor,
+  type LocalizationService,
   type ManagedLanguageStatusItem,
   type ManagedStatusBarItem,
 } from '@kkdev92/vscode-ext-kit';
 
 import { COMMANDS, CONFIG, SELECTION_DEBOUNCE_MS, STATS_CACHE_LIMIT } from '../core/constants';
-import { config } from '../core/config';
+import type { Services } from '../core/services';
 import { textStats, type TextStats } from '../lib/text';
+
+/** The selection measurement, in the corner. Created at activation. */
+export const SelectionStatus = defineStatusBarItem({
+  id: 'quickUtils.selection',
+  text: '',
+  alignment: 'right',
+  priority: 100,
+  command: COMMANDS.INSPECT,
+  visible: false,
+});
+
+/** JSON validity, shown only in JSON editors. */
+export const JsonStatus = defineLanguageStatusItem({
+  id: 'quickUtils.json',
+  selector: [{ language: 'json' }, { language: 'jsonc' }],
+  name: 'Quick Utils',
+  text: '',
+  command: { command: COMMANDS.JSON_FORMAT, title: 'Format JSON' },
+});
 
 /**
  * Measurements already taken, keyed by locale and text.
@@ -39,173 +57,155 @@ import { textStats, type TextStats } from '../lib/text';
 const statsCache = new Map<string, TextStats>();
 
 function measure(text: string, locale: string): TextStats {
-  return getOrCreateCached(statsCache, `${locale}\u0000${text}`, STATS_CACHE_LIMIT, () =>
-    textStats(text, locale)
+  // A separator no locale tag and no document text can contain, so
+  // ('en', 'a b') and ('en a', 'b') cannot collide.
+  return getOrCreateCached(
+    statsCache,
+    `${locale}${String.fromCharCode(0)}${text}`,
+    STATS_CACHE_LIMIT,
+    () => textStats(text, locale)
   );
 }
 
 /** Languages where a character count says more than a word count. */
-function prefersCharacterCount(): boolean {
-  return isLanguage('ja') || isLanguage('zh') || isLanguage('ko') || isLanguage('th');
+function prefersCharacterCount(l10n: LocalizationService): boolean {
+  return l10n.is('ja') || l10n.is('zh') || l10n.is('ko') || l10n.is('th');
+}
+
+/** What the two indicators need, plus the controllers they drive. */
+export interface InspectContext extends Services {
+  readonly selectionStatus: ManagedStatusBarItem;
+  readonly jsonStatus: ManagedLanguageStatusItem;
 }
 
 /**
- * The locale driving word segmentation.
+ * Keeps both indicators current.
  *
- * It matters: `Intl.Segmenter` breaks Chinese, Japanese and Thai on a
- * dictionary, so counting words in Japanese text with an `en` segmenter gives
- * a number that means nothing.
+ * Returned as a disposable rather than declared as a class: the host owns the
+ * items, so all this owns is the event subscriptions and the debounce timer.
  */
-function segmentationLocale(): string {
-  return getLanguage();
-}
-
-/** Combines the text of every selection, as one string per selection. */
-function selectedTexts(editor: vscode.TextEditor): string[] {
-  return editor.selections
-    .filter((selection) => !selection.isEmpty)
-    .map((selection) => editor.document.getText(selection));
-}
-
-export class InspectFeature implements vscode.Disposable {
-  private readonly statusBar: ManagedStatusBarItem;
-  private readonly jsonStatus: ManagedLanguageStatusItem;
-  private readonly subscriptions: vscode.Disposable[] = [];
-
+export function watchInspectTargets(context: InspectContext): vscode.Disposable {
   /**
    * Recomputing on every cursor movement would run `Intl.Segmenter` over the
    * selection on each keystroke of a shift-arrow drag, so updates wait for the
    * selection to settle.
    */
-  private readonly updateSoon = debounce(() => {
-    this.update();
+  const updateSoon = debounce(() => {
+    update();
   }, SELECTION_DEBOUNCE_MS);
 
-  constructor() {
-    this.statusBar = createStatusBarItem('quickUtils.selection', {
-      text: '',
-      alignment: 'right',
-      priority: 100,
-      command: COMMANDS.INSPECT,
-      tooltip: l10n.t('Quick Utils — click for full selection statistics'),
-      visible: false,
-    });
+  const update = (): void => {
+    const editor = context.editors.active;
+    updateStatusBar(context, editor);
+    updateJsonStatus(context, editor);
+  };
 
-    this.jsonStatus = createLanguageStatusItem(
-      'quickUtils.json',
-      [{ language: 'json' }, { language: 'jsonc' }],
-      {
-        name: 'Quick Utils',
-        text: '',
-        command: { command: COMMANDS.JSON_FORMAT, title: l10n.t('Format JSON') },
+  const subscriptions = [
+    vscode.window.onDidChangeTextEditorSelection(() => {
+      updateSoon();
+    }),
+    vscode.window.onDidChangeActiveTextEditor(() => {
+      updateSoon();
+    }),
+    vscode.workspace.onDidChangeTextDocument((event) => {
+      if (event.document === vscode.window.activeTextEditor?.document) {
+        updateSoon();
       }
-    );
+    }),
+    context.config.watch(CONFIG.STATUS_BAR, undefined, () => {
+      update();
+    }),
+  ];
 
-    this.subscriptions.push(
-      vscode.window.onDidChangeTextEditorSelection(() => {
-        this.updateSoon();
-      }),
-      vscode.window.onDidChangeActiveTextEditor(() => {
-        this.updateSoon();
-      }),
-      vscode.workspace.onDidChangeTextDocument((event) => {
-        if (event.document === vscode.window.activeTextEditor?.document) {
-          this.updateSoon();
-        }
-      }),
-      config.onDidChange(CONFIG.STATUS_BAR, () => {
-        this.update();
+  update();
+
+  return {
+    dispose(): void {
+      updateSoon.cancel();
+      for (const subscription of subscriptions) {
+        subscription.dispose();
+      }
+    },
+  };
+}
+
+function updateStatusBar(context: InspectContext, editor: ActiveEditor | undefined): void {
+  if (editor === undefined || !context.config.read().get(CONFIG.STATUS_BAR)) {
+    context.selectionStatus.hide();
+    return;
+  }
+
+  const texts = editor.selectedTexts().filter((text) => text.length > 0);
+  if (texts.length === 0) {
+    context.selectionStatus.hide();
+    return;
+  }
+
+  // The locale matters: `Intl.Segmenter` breaks Chinese, Japanese and Thai on a
+  // dictionary, so counting words in Japanese text with an `en` segmenter gives
+  // a number that means nothing.
+  const stats = measure(texts.join('\n'), context.l10n.language);
+  const primary = prefersCharacterCount(context.l10n)
+    ? context.l10n.plural(stats.graphemes, {
+        one: context.l10n.t('{count} char'),
+        other: context.l10n.t('{count} chars'),
       })
-    );
-
-    this.update();
-  }
-
-  /** Recomputes both indicators for the active editor. */
-  private update(): void {
-    const editor = vscode.window.activeTextEditor;
-    this.updateStatusBar(editor);
-    this.updateJsonStatus(editor);
-  }
-
-  private updateStatusBar(editor: vscode.TextEditor | undefined): void {
-    if (editor === undefined || !config.get(CONFIG.STATUS_BAR)) {
-      this.statusBar.hide();
-      return;
-    }
-
-    const texts = selectedTexts(editor);
-    if (texts.length === 0) {
-      this.statusBar.hide();
-      return;
-    }
-
-    const stats = measure(texts.join('\n'), segmentationLocale());
-    const primary = prefersCharacterCount()
-      ? plural(stats.graphemes, {
-          one: l10n.t('{count} char'),
-          other: l10n.t('{count} chars'),
-        })
-      : plural(stats.words, {
-          one: l10n.t('{count} word'),
-          other: l10n.t('{count} words'),
-        });
-
-    this.statusBar.update(`$(symbol-ruler) ${primary}`, describe(stats));
-    this.statusBar.show();
-  }
-
-  /**
-   * Reports whether the active JSON document parses.
-   *
-   * This is not a diagnostic provider — VS Code's built-in JSON language
-   * service already reports syntax errors in the Problems panel. It is a
-   * one-glance answer to "is this file valid right now", next to the button
-   * that reformats it.
-   */
-  private updateJsonStatus(editor: vscode.TextEditor | undefined): void {
-    if (editor === undefined) {
-      this.jsonStatus.update('');
-      return;
-    }
-
-    const text = editor.document.getText();
-    if (text.trim().length === 0) {
-      this.jsonStatus.update(l10n.t('$(circle-outline) Empty'), { severity: 'info' });
-      return;
-    }
-
-    try {
-      JSON.parse(text);
-      this.jsonStatus.update(l10n.t('$(check) Valid JSON'), {
-        severity: 'info',
-        detail: l10n.t('{0} bytes', formatNumber(Buffer.byteLength(text, 'utf8'))),
+    : context.l10n.plural(stats.words, {
+        one: context.l10n.t('{count} word'),
+        other: context.l10n.t('{count} words'),
       });
-    } catch (error) {
-      this.jsonStatus.update(l10n.t('$(error) Invalid JSON'), {
-        severity: 'error',
-        detail: error instanceof Error ? error.message : String(error),
-      });
-    }
+
+  context.selectionStatus.set({
+    text: `$(symbol-ruler) ${primary}`,
+    tooltip: describe(context.l10n, stats),
+  });
+  context.selectionStatus.show();
+}
+
+/**
+ * Reports whether the active JSON document parses.
+ *
+ * This is not a diagnostic provider — VS Code's built-in JSON language service
+ * already reports syntax errors in the Problems panel. It is a one-glance
+ * answer to "is this file valid right now", next to the button that reformats
+ * it.
+ */
+function updateJsonStatus(context: InspectContext, editor: ActiveEditor | undefined): void {
+  if (editor === undefined) {
+    context.jsonStatus.update('');
+    return;
   }
 
-  dispose(): void {
-    this.updateSoon.cancel();
-    for (const subscription of this.subscriptions) {
-      subscription.dispose();
-    }
-    this.statusBar.dispose();
-    this.jsonStatus.dispose();
+  const text = editor.text();
+  if (text.trim().length === 0) {
+    context.jsonStatus.update(context.l10n.t('$(circle-outline) Empty'), { severity: 'info' });
+    return;
+  }
+
+  try {
+    JSON.parse(text);
+    context.jsonStatus.update(context.l10n.t('$(check) Valid JSON'), {
+      severity: 'info',
+      detail: context.l10n.t(
+        '{0} bytes',
+        context.l10n.number(Buffer.byteLength(text, 'utf8'))
+      ),
+    });
+  } catch (error) {
+    context.jsonStatus.update(context.l10n.t('$(error) Invalid JSON'), {
+      severity: 'error',
+      detail: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
 /** One-line summary used as the status bar tooltip. */
-function describe(stats: TextStats): string {
+function describe(l10n: LocalizationService, stats: TextStats): string {
   return [
-    `${formatNumber(stats.graphemes)} ${l10n.t('characters')}`,
-    `${formatNumber(stats.words)} ${l10n.t('words')}`,
-    `${formatNumber(stats.lines)} ${l10n.t('lines')}`,
-    `${formatNumber(stats.bytes)} ${l10n.t('bytes')}`,
+    `${l10n.number(stats.graphemes)} ${l10n.t('characters')}`,
+    `${l10n.number(stats.words)} ${l10n.t('words')}`,
+    `${l10n.number(stats.lines)} ${l10n.t('lines')}`,
+    `${l10n.number(stats.bytes)} ${l10n.t('bytes')}`,
   ].join(' · ');
 }
 
@@ -215,37 +215,40 @@ function describe(stats: TextStats): string {
  * A modal rather than a toast: these are numbers people read and compare, and
  * a toast that disappears mid-read is worse than no toast.
  */
-export async function inspectSelection(editor: vscode.TextEditor): Promise<void> {
-  const texts = selectedTexts(editor);
-  const target = texts.length === 0 ? editor.document.getText() : texts.join('\n');
-  const scope = texts.length === 0 ? l10n.t('Whole document') : describeScope(texts.length);
+export async function inspectSelection(context: Services, editor: ActiveEditor): Promise<void> {
+  const texts = editor.selectedTexts().filter((text) => text.length > 0);
+  const target = texts.length === 0 ? editor.text() : texts.join('\n');
+  const scope =
+    texts.length === 0
+      ? context.l10n.t('Whole document')
+      : describeScope(context.l10n, texts.length);
 
-  const stats = measure(target, segmentationLocale());
+  const stats = measure(target, context.l10n.language);
 
   // Offsets are resolved in one pass rather than per selection, which is what
   // keeps this cheap on a document with hundreds of cursors.
   const bounds = editor.selections.flatMap((selection) => [selection.start, selection.end]);
-  const offsets = resolveOffsetsBatch(editor.document, bounds);
+  const offsets = editor.offsetsAt(bounds);
   const span =
     texts.length === 0 || offsets.length === 0
       ? undefined
-      : `${formatNumber(Math.min(...offsets))}–${formatNumber(Math.max(...offsets))}`;
+      : `${context.l10n.number(Math.min(...offsets))}–${context.l10n.number(Math.max(...offsets))}`;
 
-  await showInfo(scope, {
+  await context.notify.info(scope, {
     modal: true,
     detail: [
-      `${l10n.t('Characters')}: ${formatNumber(stats.graphemes)}`,
-      `${l10n.t('Code points')}: ${formatNumber(stats.characters)}`,
-      `${l10n.t('Words')}: ${formatNumber(stats.words)}`,
-      `${l10n.t('Lines')}: ${formatNumber(stats.lines)}`,
-      `${l10n.t('Bytes (UTF-8)')}: ${formatNumber(stats.bytes)}`,
-      ...(span === undefined ? [] : [`${l10n.t('Offset range')}: ${span}`]),
+      `${context.l10n.t('Characters')}: ${context.l10n.number(stats.graphemes)}`,
+      `${context.l10n.t('Code points')}: ${context.l10n.number(stats.characters)}`,
+      `${context.l10n.t('Words')}: ${context.l10n.number(stats.words)}`,
+      `${context.l10n.t('Lines')}: ${context.l10n.number(stats.lines)}`,
+      `${context.l10n.t('Bytes (UTF-8)')}: ${context.l10n.number(stats.bytes)}`,
+      ...(span === undefined ? [] : [`${context.l10n.t('Offset range')}: ${span}`]),
     ].join('\n'),
   });
 }
 
-function describeScope(selectionCount: number): string {
-  return plural(selectionCount, {
+function describeScope(l10n: LocalizationService, selectionCount: number): string {
+  return l10n.plural(selectionCount, {
     one: l10n.t('{count} selection'),
     other: l10n.t('{count} selections'),
   });

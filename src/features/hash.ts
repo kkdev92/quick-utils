@@ -9,32 +9,23 @@
 
 import * as vscode from 'vscode';
 import {
-  confirm,
-  createSecretStorage,
-  createSecretStore,
   err,
-  getAllSelectedText,
-  inputText,
-  l10n,
   mapResult,
   mapResultErr,
   ok,
-  pickOne,
-  showError,
-  showInfo,
-  showStatusMessage,
   toPickButton,
   toPickItem,
-  transformAllSelections,
   unwrap,
-  type Logger,
+  type ActiveEditor,
+  type StatusBarService,
   type Result,
-  type SecretStorage,
+  type SecretAccessor,
   type SecretStore,
+  type TypedStorage,
 } from '@kkdev92/vscode-ext-kit';
 
 import { CONFIG } from '../core/constants';
-import { config } from '../core/config';
+import type { Services } from '../core/services';
 import {
   HASH_ALGORITHMS,
   KeyEncodingError,
@@ -55,35 +46,28 @@ import type { HistoryStore } from './history';
 const SECRET_PREFIX = 'quickUtils.hmac:';
 
 /** The single "just sign it" key, addressed on its own so it can be watched. */
+// The key itself is declared in core/storage (`DefaultSecret`); this is the
+// prefix that keeps user-named secrets from colliding with it.
 const DEFAULT_SECRET_KEY = 'quickUtils.defaultSecret';
+void DEFAULT_SECRET_KEY;
 
 /** Memento key remembering that the user accepted a legacy digest algorithm. */
-const LEGACY_ACKNOWLEDGED = 'quickUtils.acknowledgedLegacyHash';
 
 /** Collaborators the hash commands need. */
-export interface HashContext {
-  logger: Logger;
+export interface HashContext extends Services {
   history: HistoryStore;
+  /**
+   * Secrets the user named. Injected through the `Secrets` token, which is the
+   * counterpart to `defineSecret`: the names here are not known until someone
+   * types one.
+   */
   secrets: SecretStore;
-  /** The default signing key, as its own watchable handle. */
-  defaultSecret: SecretStorage;
-  globalState: vscode.Memento;
-}
-
-/** Creates the store used for named HMAC secrets. */
-export function createHmacSecretStore(context: vscode.ExtensionContext): SecretStore {
-  return createSecretStore(context);
-}
-
-/**
- * Creates the handle for the default signing key.
- *
- * A single-key wrapper rather than another lookup through the store, because
- * this one needs `onDidChange`: the key can be set from another window, and the
- * "no default key yet" prompt must stop appearing when it is.
- */
-export function createDefaultSecretStorage(context: vscode.ExtensionContext): SecretStorage {
-  return createSecretStorage(context, DEFAULT_SECRET_KEY);
+  /** The default signing key — one declared secret, with change notification. */
+  defaultSecret: SecretAccessor<string>;
+  /** Whether the MD5/SHA-1 warning has already been acknowledged. */
+  legacyAcknowledged: TypedStorage<boolean>;
+  /** Short-lived confirmations, in the corner. */
+  status: StatusBarService;
 }
 
 /**
@@ -102,7 +86,11 @@ function readKey(text: string, encoding: KeyEncoding): Result<Uint8Array, Error>
 }
 
 /** Turns a key-decoding failure into something worth showing a user. */
-function explainKeyFailure(error: Error, encoding: KeyEncoding): string {
+function explainKeyFailure(
+  l10n: Services['l10n'],
+  error: Error,
+  encoding: KeyEncoding
+): string {
   return error instanceof KeyEncodingError
     ? l10n.t(
         '{0} Check that quickUtils.hmacKeyEncoding ({1}) matches how the secret was issued.',
@@ -113,17 +101,20 @@ function explainKeyFailure(error: Error, encoding: KeyEncoding): string {
 }
 
 /** Asks which digest algorithm to use, defaulting to the configured one. */
-async function pickAlgorithm(placeHolder: string): Promise<HashAlgorithm | undefined> {
-  const configured = config.get(CONFIG.HASH_ALGORITHM);
+async function pickAlgorithm(
+  context: Services,
+  placeHolder: string
+): Promise<HashAlgorithm | undefined> {
+  const configured = context.config.read().get(CONFIG.HASH_ALGORITHM);
 
-  const picked = await pickOne(
+  const picked = await context.ask.one(
     HASH_ALGORITHMS.map((algorithm) =>
       toPickItem(algorithm, {
         label: algorithm.toUpperCase(),
         description: [
-          algorithm === configured ? l10n.t('configured default') : undefined,
+          algorithm === configured ? context.l10n.t('configured default') : undefined,
           isLegacyAlgorithm(algorithm)
-            ? l10n.t('checksums only — not collision resistant')
+            ? context.l10n.t('checksums only — not collision resistant')
             : undefined,
         ]
           .filter((part) => part !== undefined)
@@ -144,19 +135,25 @@ async function pickAlgorithm(placeHolder: string): Promise<HashAlgorithm | undef
  * a nag: someone who genuinely needs MD5 checksums says so once.
  */
 async function confirmLegacyAlgorithm(
+  notify: Services['notify'],
+  l10n: Services['l10n'],
   algorithm: HashAlgorithm,
-  globalState: vscode.Memento
+  acknowledged: TypedStorage<boolean>
 ): Promise<boolean> {
   if (!isLegacyAlgorithm(algorithm)) {
     return true;
   }
-  return confirm(
+  return notify.confirm(
     l10n.t('{0} is not collision resistant. Use it for checksums only.', algorithm.toUpperCase()),
     {
       severity: 'warn',
       detail: l10n.t('Choose SHA-256 or stronger if this value protects anything.'),
       yesText: l10n.t('Use it anyway'),
-      remember: { memento: globalState, key: LEGACY_ACKNOWLEDGED },
+      remember: acknowledged,
+      // Localized like the other two, and worded as the standing decision it
+      // actually is: pressing it accepts every future legacy digest without
+      // asking again.
+      rememberText: l10n.t('Always use it'),
     }
   );
 }
@@ -164,13 +161,13 @@ async function confirmLegacyAlgorithm(
 /** Replaces each selection with its digest, or copies the digest if nothing is selected. */
 export async function hashSelection(
   context: HashContext,
-  editor: vscode.TextEditor
+  editor: ActiveEditor
 ): Promise<void> {
-  const algorithm = await pickAlgorithm(l10n.t('Digest algorithm'));
+  const algorithm = await pickAlgorithm(context, context.l10n.t('Digest algorithm'));
   if (algorithm === undefined) {
     return;
   }
-  if (!(await confirmLegacyAlgorithm(algorithm, context.globalState))) {
+  if (!(await confirmLegacyAlgorithm(context.notify, context.l10n, algorithm, context.legacyAcknowledged))) {
     return;
   }
 
@@ -182,9 +179,9 @@ export async function hashSelection(
 /** Replaces each selection with its HMAC under a secret chosen for this run. */
 export async function hmacSelection(
   context: HashContext,
-  editor: vscode.TextEditor
+  editor: ActiveEditor
 ): Promise<void> {
-  const algorithm = await pickAlgorithm(l10n.t('HMAC algorithm'));
+  const algorithm = await pickAlgorithm(context, context.l10n.t('HMAC algorithm'));
   if (algorithm === undefined) {
     return;
   }
@@ -211,12 +208,12 @@ export async function hmacSelection(
  */
 export async function hmacWithDefaultSecret(
   context: HashContext,
-  editor: vscode.TextEditor
+  editor: ActiveEditor
 ): Promise<void> {
-  const stored = await context.defaultSecret.get();
+  const stored = await context.defaultSecret.read();
   if (stored === undefined) {
-    const action = await showInfo(l10n.t('No default signing key is set.'), {
-      actions: [{ title: l10n.t('Set one now'), value: 'set' as const }],
+    const action = await context.notify.info(context.l10n.t('No default signing key is set.'), {
+      actions: [{ title: context.l10n.t('Set one now'), value: 'set' as const }],
     });
     if (action === 'set') {
       await setDefaultSecret(context);
@@ -224,14 +221,14 @@ export async function hmacWithDefaultSecret(
     return;
   }
 
-  const algorithm = config.get(CONFIG.HASH_ALGORITHM);
-  const encoding = config.get(CONFIG.HMAC_KEY_ENCODING);
+  const algorithm = context.config.read().get(CONFIG.HASH_ALGORITHM);
+  const encoding = context.config.read().get(CONFIG.HMAC_KEY_ENCODING);
 
   // `unwrap` on purpose: the key was decoded successfully when it was stored,
   // so a failure here means the encoding setting changed underneath it. That is
   // worth a loud error through the command wrapper, not a quiet fallback.
   const key = unwrap(
-    mapResultErr(readKey(stored, encoding), (error) => new Error(explainKeyFailure(error, encoding)))
+    mapResultErr(readKey(stored, encoding), (error) => new Error(explainKeyFailure(context.l10n, error, encoding)))
   );
 
   await digestSelections(
@@ -252,21 +249,25 @@ export async function hmacWithDefaultSecret(
  */
 async function digestSelections(
   context: HashContext,
-  editor: vscode.TextEditor,
+  editor: ActiveEditor,
   id: string,
   label: string,
   digest: (input: string) => string
 ): Promise<void> {
-  const hasSelection = editor.selections.some((selection) => !selection.isEmpty);
+  const hasSelection = editor.selections.some(
+    (selection) =>
+      selection.start.line !== selection.end.line ||
+      selection.start.character !== selection.end.character
+  );
 
   if (!hasSelection) {
-    const value = digest(editor.document.getText());
-    const action = await showInfo(`${label}: ${value}`, {
-      actions: [{ title: l10n.t('Copy'), value: 'copy' as const }],
+    const value = digest(editor.text());
+    const action = await context.notify.info(`${label}: ${value}`, {
+      actions: [{ title: context.l10n.t('Copy'), value: 'copy' as const }],
     });
     if (action === 'copy') {
       await vscode.env.clipboard.writeText(value);
-      showStatusMessage(`$(clippy) ${l10n.t('Copied')}`, 1500);
+      context.status.flash(`$(clippy) ${context.l10n.t('Copied')}`, 1500);
     }
     await context.history.add({
       id,
@@ -278,13 +279,13 @@ async function digestSelections(
     return;
   }
 
-  const values = getAllSelectedText(editor).map(digest);
-  if (!(await transformAllSelections(editor, (original, index) => values[index] ?? original))) {
-    await showError(l10n.t('The editor rejected the edit. The file may be read-only.'));
+  const values = editor.selectedTexts().map(digest);
+  if (!(await editor.transformSelections((original, index) => values[index] ?? original))) {
+    await context.notify.error(context.l10n.t('The editor rejected the edit. The file may be read-only.'));
     return;
   }
 
-  showStatusMessage(`$(key) ${label}`, 2000);
+  context.status.flash(`$(key) ${label}`, 2000);
   await context.history.add({
     id,
     kind: 'hash',
@@ -309,18 +310,18 @@ const ADD_SECRET = ' add';
 /** Picks a stored secret and returns its key bytes. */
 async function resolveSecret(context: HashContext): Promise<Uint8Array | undefined> {
   const names = await secretNames(context.secrets);
-  const encoding = config.get(CONFIG.HMAC_KEY_ENCODING);
+  const encoding = context.config.read().get(CONFIG.HMAC_KEY_ENCODING);
 
-  const picked = await pickOne(
+  const picked = await context.ask.one(
     [
       ...names.map((name) => toPickItem(name, { label: name, icon: 'lock' })),
       toPickItem(ADD_SECRET, {
-        label: l10n.t('Add a secret…'),
+        label: context.l10n.t('Add a secret…'),
         icon: 'add',
         alwaysShow: true,
       }),
     ],
-    { placeHolder: l10n.t('Signing secret'), prompt: l10n.t('Read as {0}', encoding) }
+    { placeHolder: context.l10n.t('Signing secret'), prompt: context.l10n.t('Read as {0}', encoding) }
   );
   if (picked === undefined) {
     return undefined;
@@ -334,13 +335,13 @@ async function resolveSecret(context: HashContext): Promise<Uint8Array | undefin
   const stored = await context.secrets.get(`${SECRET_PREFIX}${picked.value}`);
   if (stored === undefined) {
     // Deleted from the keychain between listing and reading, or by another window.
-    await showError(l10n.t('That secret is no longer stored.'));
+    await context.notify.error(context.l10n.t('That secret is no longer stored.'));
     return undefined;
   }
 
   const result = readKey(stored, encoding);
   if (!result.ok) {
-    await showError(explainKeyFailure(result.error, encoding));
+    await context.notify.error(explainKeyFailure(context.l10n, result.error, encoding));
     return undefined;
   }
   return result.value;
@@ -354,18 +355,18 @@ async function addSecret(
   context: HashContext,
   existing: readonly string[]
 ): Promise<{ name: string; key: Uint8Array } | undefined> {
-  const encoding = config.get(CONFIG.HMAC_KEY_ENCODING);
+  const encoding = context.config.read().get(CONFIG.HMAC_KEY_ENCODING);
 
-  const name = await inputText({
-    prompt: l10n.t('Name for this secret'),
-    placeHolder: l10n.t('e.g. stripe-webhook'),
+  const name = await context.ask.text({
+    prompt: context.l10n.t('Name for this secret'),
+    placeHolder: context.l10n.t('e.g. stripe-webhook'),
     validate: (value) => {
       const trimmed = value.trim();
       if (trimmed.length === 0) {
-        return l10n.t('Enter a name.');
+        return context.l10n.t('Enter a name.');
       }
       if (existing.includes(trimmed)) {
-        return l10n.t('A secret with that name already exists.');
+        return context.l10n.t('A secret with that name already exists.');
       }
       return undefined;
     },
@@ -374,18 +375,18 @@ async function addSecret(
     return undefined;
   }
 
-  const value = await inputText({
-    prompt: l10n.t('Secret value, as {0}', encoding),
+  const value = await context.ask.text({
+    prompt: context.l10n.t('Secret value, as {0}', encoding),
     password: true,
     // Losing a half-typed secret because a notification stole focus is worse
     // than the input box lingering.
     ignoreFocusOut: true,
     validate: (input) => {
       if (input.length === 0) {
-        return l10n.t('Enter a value.');
+        return context.l10n.t('Enter a value.');
       }
       const result = readKey(input, encoding);
-      return result.ok ? undefined : explainKeyFailure(result.error, encoding);
+      return result.ok ? undefined : explainKeyFailure(context.l10n, result.error, encoding);
     },
   });
   if (value === undefined) {
@@ -394,7 +395,7 @@ async function addSecret(
 
   const result = readKey(value, encoding);
   if (!result.ok) {
-    await showError(explainKeyFailure(result.error, encoding));
+    await context.notify.error(explainKeyFailure(context.l10n, result.error, encoding));
     return undefined;
   }
 
@@ -405,7 +406,7 @@ async function addSecret(
   // 64-character hex secret is 32 bytes, and seeing "64 bytes" means it was
   // read as text.
   const size = unwrap(mapResult(result, (bytes) => bytes.byteLength));
-  showStatusMessage(`$(lock) ${l10n.t('Secret stored ({0} bytes)', String(size))}`, 2500);
+  context.status.flash(`$(lock) ${context.l10n.t('Secret stored ({0} bytes)', String(size))}`, 2500);
 
   return { name: name.trim(), key: result.value };
 }
@@ -420,15 +421,15 @@ export async function setDefaultSecret(context: HashContext): Promise<void> {
     }
     const stored = await context.secrets.get(`${SECRET_PREFIX}${added.name}`);
     if (stored !== undefined) {
-      await context.defaultSecret.set(stored);
-      showStatusMessage(`$(star-full) ${l10n.t('Default signing key set')}`, 2000);
+      await context.defaultSecret.write(stored);
+      context.status.flash(`$(star-full) ${context.l10n.t('Default signing key set')}`, 2000);
     }
     return;
   }
 
-  const picked = await pickOne(
+  const picked = await context.ask.one(
     names.map((name) => toPickItem(name, { label: name, icon: 'lock' })),
-    { placeHolder: l10n.t('Which secret should be the default?') }
+    { placeHolder: context.l10n.t('Which secret should be the default?') }
   );
   if (picked === undefined) {
     return;
@@ -436,13 +437,13 @@ export async function setDefaultSecret(context: HashContext): Promise<void> {
 
   const stored = await context.secrets.get(`${SECRET_PREFIX}${picked.value}`);
   if (stored === undefined) {
-    await showError(l10n.t('That secret is no longer stored.'));
+    await context.notify.error(context.l10n.t('That secret is no longer stored.'));
     return;
   }
 
-  await context.defaultSecret.set(stored);
+  await context.defaultSecret.write(stored);
   context.logger.info('Default signing key set', { name: picked.value });
-  showStatusMessage(`$(star-full) ${l10n.t('Default signing key set')}`, 2000);
+  context.status.flash(`$(star-full) ${context.l10n.t('Default signing key set')}`, 2000);
 }
 
 /** What the secrets list resolved to. */
@@ -474,14 +475,14 @@ export async function manageSecrets(context: HashContext): Promise<void> {
       continue;
     }
 
-    const confirmed = await confirm(l10n.t('Delete the secret "{0}"?', action.name), {
-      detail: l10n.t('It is removed from the OS keychain and cannot be recovered.'),
-      yesText: l10n.t('Delete'),
+    const confirmed = await context.notify.confirm(context.l10n.t('Delete the secret "{0}"?', action.name), {
+      detail: context.l10n.t('It is removed from the OS keychain and cannot be recovered.'),
+      yesText: context.l10n.t('Delete'),
     });
     if (confirmed) {
       await context.secrets.delete(`${SECRET_PREFIX}${action.name}`);
       context.logger.info('Deleted an HMAC secret', { name: action.name });
-      showStatusMessage(`$(trash) ${l10n.t('Secret deleted')}`, 2000);
+      context.status.flash(`$(trash) ${context.l10n.t('Secret deleted')}`, 2000);
     }
   }
 }
@@ -499,22 +500,22 @@ export async function manageSecrets(context: HashContext): Promise<void> {
 async function showSecretList(context: HashContext): Promise<SecretAction | undefined> {
   const names = await secretNames(context.secrets);
 
-  const deleteButton = toPickButton('trash', { tooltip: l10n.t('Delete this secret') });
+  const deleteButton = toPickButton('trash', { tooltip: context.l10n.t('Delete this secret') });
   const addButton = toPickButton('add', {
-    tooltip: l10n.t('Add a secret…'),
+    tooltip: context.l10n.t('Add a secret…'),
     location: vscode.QuickInputButtonLocation.Title,
   });
 
   let action: SecretAction | undefined;
 
-  const picked = await pickOne(
+  const picked = await context.ask.one(
     names.map((name) => toPickItem(name, { label: name, icon: 'lock', buttons: [deleteButton] })),
     {
-      title: l10n.t('Manage Secrets'),
+      title: context.l10n.t('Manage Secrets'),
       placeHolder:
         names.length === 0
-          ? l10n.t('No secrets stored yet — use the + button')
-          : l10n.t('Select a secret to replace its value'),
+          ? context.l10n.t('No secrets stored yet — use the + button')
+          : context.l10n.t('Select a secret to replace its value'),
       buttons: [addButton],
       onTriggerButton: (button, picker) => {
         if (button === addButton) {
@@ -539,18 +540,18 @@ async function showSecretList(context: HashContext): Promise<SecretAction | unde
 
 /** Replaces one secret's value, validating against the configured encoding. */
 async function replaceSecret(context: HashContext, name: string): Promise<void> {
-  const encoding = config.get(CONFIG.HMAC_KEY_ENCODING);
+  const encoding = context.config.read().get(CONFIG.HMAC_KEY_ENCODING);
 
-  const value = await inputText({
-    prompt: l10n.t('New value for "{0}", as {1}', name, encoding),
+  const value = await context.ask.text({
+    prompt: context.l10n.t('New value for "{0}", as {1}', name, encoding),
     password: true,
     ignoreFocusOut: true,
     validate: (input) => {
       if (input.length === 0) {
-        return l10n.t('Enter a value.');
+        return context.l10n.t('Enter a value.');
       }
       const result = readKey(input, encoding);
-      return result.ok ? undefined : explainKeyFailure(result.error, encoding);
+      return result.ok ? undefined : explainKeyFailure(context.l10n, result.error, encoding);
     },
   });
   if (value === undefined) {
@@ -558,5 +559,5 @@ async function replaceSecret(context: HashContext, name: string): Promise<void> 
   }
 
   await context.secrets.set(`${SECRET_PREFIX}${name}`, value);
-  showStatusMessage(`$(lock) ${l10n.t('Secret replaced')}`, 2000);
+  context.status.flash(`$(lock) ${context.l10n.t('Secret replaced')}`, 2000);
 }

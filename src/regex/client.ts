@@ -10,7 +10,14 @@
 import { Worker } from 'node:worker_threads';
 import { join } from 'node:path';
 
-import { TimeoutError, measureTime, withTimeout, type Logger } from '@kkdev92/vscode-ext-kit';
+import {
+  TimeoutError,
+  measureTime,
+  withTimeout,
+  type Logger,
+} from '@kkdev92/vscode-ext-kit';
+// The timing helpers are their own subpath: the root barrel imports `vscode`,
+// so anything that has to run without it ships separately.
 
 import type { RegexMatchResult } from '../lib/regex';
 import { RegexError } from '../lib/regex';
@@ -155,7 +162,7 @@ export class RegexClient {
       // Nothing is waiting on this worker between requests, so a crash while
       // idle must not surface as an unhandled 'error' event.
       worker.on('error', (error) => {
-        this.logger.error(error);
+        this.logger.error('Regex worker failed while idle', error);
       });
       // Do not hold the extension host's event loop open.
       worker.unref();

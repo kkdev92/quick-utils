@@ -2,33 +2,58 @@
  * Extension entry point.
  *
  * Wiring only: every behaviour lives under `src/lib` (pure logic),
- * `src/features` (VS Code-facing) or `src/regex` (the worker). Keeping this
- * file declarative is what makes the rest testable without an extension host.
+ * `src/features` (VS Code-facing) or `src/regex` (the worker).
+ *
+ * v2 built everything imperatively inside `activate` and pushed each piece onto
+ * a disposable list. v3 *declares* it: the module below is a value, the plan
+ * compiles at import time — before VS Code is touched — and the host owns every
+ * registration through one stop path. Nothing in this file calls a VS Code API.
  */
 
-import * as vscode from 'vscode';
 import {
-  confirm,
-  createExtensionKit,
-  createScope,
-  createTreeView,
-  createWorkspaceStorage,
-  getLanguage,
-  l10n,
-  plural,
-  s,
-  showError,
-  showStatusMessage,
-  type CommandHandler,
-  type TextEditorCommandHandler,
+  FileWatchers,
+  Localization,
+  Log,
+  Operations,
+  Secrets,
+  StatusBar,
+  Webviews,
+  defineExtension,
+  defineModule,
+  serviceToken,
+  type ActiveEditor,
+  type ApplicationPlan,
+  type ManagedWebview,
+  type OperationContext,
+  type ManagedWebviewPanel,
+  type ServiceToken,
+  Commands,
 } from '@kkdev92/vscode-ext-kit';
 
+import * as vscode from 'vscode';
+
 import { KIT_VERSION } from './core/build';
-import { config, resolveJsonIndent, tabSize } from './core/config';
-import { COMMANDS, CONFIG, EXTENSION_NAME, STORAGE, VIEWS, type CommandId } from './core/constants';
-import { createTransformRegistry } from './core/transforms';
-import { transformIdSchema } from './core/types';
-import { registerDiagnostics, type DiagnosticsCommandId } from './features/diagnostics';
+import * as Cmd from './core/commands';
+import { EditorSettings, Settings, resolveJsonIndent } from './core/config';
+import { EXTENSION_ID, EXTENSION_NAME, PUBLISHER, REGEX_TESTER_VIEW_TYPE, VIEWS } from './core/constants';
+import { uses, type TesterServices } from './core/services';
+import {
+  DefaultSecret,
+  FavoritesStorage,
+  HistoryStorage,
+  LastTransformStorage,
+  LegacyHashAcknowledged,
+} from './core/storage';
+import { createTransformRegistry, type TransformRegistry } from './core/transforms';
+import {
+  collectDiagnostics,
+  createReportChannel,
+  describeDocument,
+  reportState,
+  type BuildInfo,
+  type DiagnosticsContext,
+  type ReportChannel,
+} from './features/diagnostics';
 import {
   convertTimestamp,
   insertDateTime,
@@ -38,350 +63,541 @@ import {
   insertUuidV7,
 } from './features/generate';
 import {
-  createDefaultSecretStorage,
-  createHmacSecretStore,
   hashSelection,
   hmacSelection,
   hmacWithDefaultSecret,
   manageSecrets,
   setDefaultSecret,
+  type HashContext,
 } from './features/hash';
+import { HistoryStore, HistoryTreeProvider, describeHistoryEntry } from './features/history';
+import { registerDecodeHover } from './features/hover';
 import {
-  HistoryStore,
-  HistoryTreeProvider,
-  describeHistoryEntry,
-  type HistoryItem,
-} from './features/history';
-import { InspectFeature, inspectSelection } from './features/inspect';
-import {
-  disposeRegexTester,
-  openRegexTester,
-  registerRegexTesterSerializer,
-} from './features/regexTester';
-import { registerScratchpad } from './features/scratchpad';
+  JsonStatus,
+  SelectionStatus,
+  inspectSelection,
+  watchInspectTargets,
+} from './features/inspect';
 import { runPipeline } from './features/pipeline';
-import { extractMatches, replaceByPattern } from './features/replaceMatches';
-import { FavoritesStore, ToolsTreeProvider, createToolsDragAndDrop } from './features/tools';
+import { loadPresets } from './features/presetLoader';
+import {
+  PRESET_FILE,
+  PresetStore,
+  insertPreset,
+  reloadPresets,
+  type PresetContext,
+} from './features/presets';
+import { disposeRegexTester, initialiseRegexTester, openRegexTester } from './features/regexTester';
+import {
+  extractMatches,
+  replaceByPattern,
+  type ReplaceContext,
+} from './features/replaceMatches';
+import { resolveScratchpad } from './features/scratchpad';
+import { FavoritesStore, ToolsTreeProvider } from './features/tools';
 import {
   applyTransformById,
   pickAndTransform,
   transformAgain,
   transformClipboard,
+  type TransformContext,
 } from './features/transform';
+import { watchFiles, type WatchContext } from './features/watch';
 import { RegexClient, defaultWorkerPath } from './regex/client';
+import { TOOLS_DRAG_MIME } from './core/constants';
+import type { RegexTesterSchema, ScratchpadSchema } from './webview/protocol';
+
+// ---- Tokens for what this extension provides itself -----------------------
+
+const Registry: ServiceToken<TransformRegistry> =
+  serviceToken<TransformRegistry>('quickUtils.registry');
+const History: ServiceToken<HistoryStore> = serviceToken<HistoryStore>('quickUtils.history');
+const Favorites: ServiceToken<FavoritesStore> =
+  serviceToken<FavoritesStore>('quickUtils.favorites');
+const Regex: ServiceToken<RegexClient> = serviceToken<RegexClient>('quickUtils.regexClient');
+const Report: ServiceToken<ReportChannel> = serviceToken<ReportChannel>('quickUtils.report');
+const Build: ServiceToken<BuildInfo> = serviceToken<BuildInfo>('quickUtils.build');
+const Tools: ServiceToken<ToolsTreeProvider> =
+  serviceToken<ToolsTreeProvider>('quickUtils.toolsProvider');
+const HistoryView: ServiceToken<HistoryTreeProvider> =
+  serviceToken<HistoryTreeProvider>('quickUtils.historyProvider');
+const Presets: ServiceToken<PresetStore> = serviceToken<PresetStore>('quickUtils.presets');
+const PresetReload: ServiceToken<() => Promise<void>> =
+  serviceToken<() => Promise<void>>('quickUtils.presetReload');
+
 
 /**
- * Commands that require an open editor.
+ * This build's version, for the state report.
  *
- * Registering them as text editor commands means VS Code enables them only
- * when an editor has focus and hands the editor to the handler, so none of
- * them needs its own "is there an editor?" check.
+ * Read from the extension registry rather than from an `ExtensionContext`: the
+ * host owns that, and a module declaration never sees one.
  */
-type EditorCommandId =
-  | typeof COMMANDS.TRANSFORM
-  | typeof COMMANDS.TRANSFORM_AGAIN
-  | typeof COMMANDS.TRANSFORM_PIPELINE
-  | typeof COMMANDS.REPLACE_MATCHES
-  | typeof COMMANDS.EXTRACT_MATCHES
-  | typeof COMMANDS.UPPER_CASE
-  | typeof COMMANDS.LOWER_CASE
-  | typeof COMMANDS.CAMEL_CASE
-  | typeof COMMANDS.PASCAL_CASE
-  | typeof COMMANDS.SNAKE_CASE
-  | typeof COMMANDS.KEBAB_CASE
-  | typeof COMMANDS.CONSTANT_CASE
-  | typeof COMMANDS.TITLE_CASE
-  | typeof COMMANDS.BASE64_ENCODE
-  | typeof COMMANDS.BASE64_DECODE
-  | typeof COMMANDS.URL_ENCODE
-  | typeof COMMANDS.URL_DECODE
-  | typeof COMMANDS.SORT_LINES
-  | typeof COMMANDS.DEDUPE_LINES
-  | typeof COMMANDS.JSON_FORMAT
-  | typeof COMMANDS.JSON_MINIFY
-  | typeof COMMANDS.JSON_SORT_KEYS
-  | typeof COMMANDS.GENERATE_UUID
-  | typeof COMMANDS.GENERATE_UUID_V7
-  | typeof COMMANDS.GENERATE_PASSWORD
-  | typeof COMMANDS.GENERATE_LOREM
-  | typeof COMMANDS.INSERT_DATE
-  | typeof COMMANDS.CONVERT_TIMESTAMP
-  | typeof COMMANDS.HASH
-  | typeof COMMANDS.HMAC
-  | typeof COMMANDS.HMAC_DEFAULT
-  | typeof COMMANDS.INSPECT;
+function extensionVersion(): string {
+  const packaged = vscode.extensions.getExtension(`${PUBLISHER}.${EXTENSION_ID}`);
+  return (packaged?.packageJSON as { version?: string } | undefined)?.version ?? 'unknown';
+}
 
-/**
- * Everything else, minus what the diagnostics feature registers itself.
- *
- * Derived rather than listed, so the `Record<PlainCommandId, …>` below fails to
- * compile if a command is added to {@link COMMANDS} and never registered — the
- * three command sets between them still have to cover the union exactly.
- */
-type PlainCommandId = Exclude<CommandId, EditorCommandId | DiagnosticsCommandId>;
+const quickUtils = defineModule('quickUtils', { uses }, (module): undefined => {
+  // ---- What is persisted, and what is configurable -----------------------
 
-export function activate(context: vscode.ExtensionContext): void {
-  // The kit owns the logger and a disposable scope, and registers itself in
-  // context.subscriptions — everything added below is torn down with it.
-  const kit = createExtensionKit<CommandId>(context, EXTENSION_NAME, {
-    logger: { level: config.get(CONFIG.LOG_LEVEL) },
-  });
-  const { logger } = kit;
+  module.settings.add(Settings);
+  module.settings.add(EditorSettings);
+  module.storage.add(HistoryStorage);
+  module.storage.add(FavoritesStorage);
+  module.storage.add(LastTransformStorage);
+  module.storage.add(LegacyHashAcknowledged);
+  module.secrets.add(DefaultSecret);
 
-  const undeclared = config.checkPackageJsonSync(context);
-  if (undeclared.length > 0) {
-    logger.warn('Settings declared in the config schema but missing from package.json', {
-      keys: undeclared.join(', '),
-    });
-  }
+  // ---- Services ----------------------------------------------------------
 
-  kit.disposables.push(
-    tabSize,
-    // The level arrives schema-validated, unlike the logger's own
-    // `configSection` re-read.
-    config.onDidChange(CONFIG.LOG_LEVEL, (level) => {
-      logger.setLevel(level);
-    }),
-    // Surface a setting that fails validation as soon as it is edited, rather
-    // than silently serving the default until someone wonders why.
-    config.onDidChangeAny(() => {
-      for (const key of Object.values(CONFIG)) {
-        const result = config.tryGet(key);
-        if (!result.ok) {
-          logger.warn('Setting failed validation; using the default', {
-            key,
-            issues: result.error.map((issue) => issue.message).join('; '),
-          });
-        }
-      }
-    })
-  );
-
-  const registry = createTransformRegistry({
-    jsonIndent: resolveJsonIndent,
-    locale: getLanguage,
+  module.services.singleton(Registry, {
+    inject: { config: Settings.token, editorConfig: EditorSettings.token, l10n: Localization },
+    create: ({ config, editorConfig, l10n }) =>
+      createTransformRegistry({
+        jsonIndent: () => resolveJsonIndent(config, editorConfig),
+        locale: () => l10n.language,
+      }),
   });
 
-  const history = new HistoryStore(context, logger.child('history'));
-  const lastTransform = createWorkspaceStorage<string | undefined>(
-    context,
-    STORAGE.LAST_TRANSFORM,
-    {
-      defaultValue: undefined,
-      // A stored id whose transform has since been removed reads back as unset,
-      // so "Apply Again" says "run a transform first" instead of failing.
-      schema: s.optional(transformIdSchema((id) => registry.has(id))),
-    }
-  );
-  const favorites = new FavoritesStore(context);
-  const secrets = createHmacSecretStore(context);
-  const defaultSecret = createDefaultSecretStorage(context);
-  const client = new RegexClient(defaultWorkerPath(), logger.child('regex'));
-
-  kit.disposables.push(history, lastTransform, favorites, secrets, defaultSecret, {
-    dispose: () => {
-      client.dispose();
-    },
+  module.services.singleton(History, {
+    inject: { storage: HistoryStorage.token, config: Settings.token, log: Log },
+    create: ({ storage, config, log }) =>
+      new HistoryStore(storage, config, log.withFields({ feature: 'history' })),
   });
 
-  // The default key can be set from another window; noting it here is what
-  // makes "why did signing start working?" answerable from the log.
-  kit.disposables.push(
-    defaultSecret.onDidChange(() => {
-      logger.info('Default signing key changed');
-    })
-  );
+  module.services.singleton(Favorites, {
+    inject: { storage: FavoritesStorage.token },
+    create: ({ storage }) => new FavoritesStore(storage),
+  });
+
+  module.services.singleton(Regex, {
+    inject: { log: Log },
+    create: ({ log }) => new RegexClient(defaultWorkerPath(), log.withFields({ feature: 'regex' })),
+  });
+
+  module.services.singleton(Report, () => createReportChannel());
+
+  module.services.singleton(Build, () => ({
+    extensionVersion: extensionVersion(),
+    kitVersion: KIT_VERSION,
+  }));
+
+  module.services.singleton(Presets, () => new PresetStore());
+
+  // The reload closure rather than the loader function: the watcher below, the
+  // reload command and activation all have to do the same thing, and binding
+  // the store and logger once here is what stops the three of them from
+  // drifting into three slightly different loads.
+  module.services.singleton(PresetReload, {
+    inject: { store: Presets, log: Log },
+    create:
+      ({ store, log }) =>
+      (): Promise<void> =>
+        loadPresets(store, log.withFields({ feature: 'presets' })),
+  });
+
+  // A service rather than a tree-view local: the checkbox handler and the
+  // reset command both drive the same provider.
+  module.services.singleton(Tools, {
+    inject: { registry: Registry, favorites: Favorites, l10n: Localization, log: Log },
+    create: ({ registry, favorites, l10n, log }) =>
+      new ToolsTreeProvider(registry, favorites, l10n, log.withFields({ feature: 'tools' })),
+  });
+
+  module.services.singleton(HistoryView, {
+    inject: { history: History, registry: Registry, config: Settings.token, l10n: Localization },
+    create: ({ history, registry, config, l10n }) =>
+      new HistoryTreeProvider(history, config, l10n, (entry) =>
+        describeHistoryEntry(l10n, registry, entry)
+      ),
+  });
 
   // ---- Views -------------------------------------------------------------
 
-  const views = createScope(context);
-
-  const historyProvider = new HistoryTreeProvider(history, (entry) =>
-    describeHistoryEntry(registry, entry)
-  );
-  const historyView = createTreeView(context, VIEWS.HISTORY, historyProvider, {
-    showCollapseAll: false,
+  module.treeViews.add({
+    id: VIEWS.HISTORY,
+    inject: { provider: HistoryView },
+    resolveProvider: ({ provider }) => provider,
+    options: { showCollapseAll: false },
   });
 
-  const toolsProvider = new ToolsTreeProvider(registry, favorites, logger.child('tools'));
-  const toolsView = createTreeView(context, VIEWS.TOOLS, toolsProvider, {
-    showCollapseAll: true,
-    dragAndDropController: createToolsDragAndDrop(toolsProvider),
+  module.treeViews.add({
+    id: VIEWS.TOOLS,
+    inject: { tools: Tools },
+    resolveProvider: ({ tools }) => tools,
+    options: {
+      showCollapseAll: true,
+      // Dropping a category row onto Favorites is natural, but the controller
+      // only receives ids and a category id maps to no command — those drops
+      // are ignored, so the checkbox stays the single way to add a favourite.
+      dragAndDrop: {
+        mimeType: TOOLS_DRAG_MIME,
+        onDrop: () => undefined,
+      },
+    },
   });
 
-  const updateBadge = (): void => {
-    const count = history.count;
-    historyView.badge =
-      count === 0
-        ? undefined
-        : {
-            value: count,
-            tooltip: plural(count, {
-              one: l10n.t('{count} recorded operation'),
-              other: l10n.t('{count} recorded operations'),
-            }),
-          };
-  };
-  updateBadge();
+  module.webviews.addView({
+    id: VIEWS.SCRATCHPAD,
+    inject: { registry: Registry },
+    resolve: (view: ManagedWebview<ScratchpadSchema>, { registry, logger, l10n, editors }) => {
+      resolveScratchpad({ logger, registry, l10n, editors }, view);
+    },
+    options: { enableScripts: true },
+  });
 
-  views.push(
-    historyProvider,
-    historyView,
-    toolsProvider,
-    toolsView,
-    history.onDidChange(updateBadge),
-    toolsProvider.onDidChangeCheckboxState((changes) => {
-      void kit.run('Update favorites', async () => {
-        for (const change of changes) {
-          const commandId = change.item.data?.command;
-          if (commandId !== undefined) {
-            await toolsProvider.setFavorite(commandId, change.checked);
-          }
-        }
+  module.webviews.restorePanel({
+    viewType: REGEX_TESTER_VIEW_TYPE,
+    inject: {
+      client: Regex,
+      webviews: Webviews,
+      operations: Operations,
+      watchers: FileWatchers,
+      commands: Commands,
+    },
+    restore: async (
+      panel: ManagedWebviewPanel<RegexTesterSchema>,
+      _state: unknown,
+      injected: TesterServices
+    ) => {
+      // The webview restores its own pattern and subject from setState/getState,
+      // so nothing has to be replayed from here.
+      await initialiseRegexTester(injected, panel);
+    },
+  });
+
+  // ---- Status indicators -------------------------------------------------
+
+  module.statusBar.add(SelectionStatus);
+  module.languageStatus.add(JsonStatus);
+
+  // ---- Background wiring -------------------------------------------------
+
+  // A glob known when this line is written, so it is declared rather than
+  // started at runtime: the host binds it at activation, runs the handler in an
+  // operation, and tears it down with the module. `FileWatchers.watch` is for
+  // the other case — see the watch command below, where the user types the
+  // pattern.
+  module.fileWatchers.add({
+    id: 'quickUtils.presetFile',
+    patterns: `**/${PRESET_FILE}`,
+    // The file is edited by hand, so changes arrive in bursts of keystroke
+    // saves. Reloading once after they settle is the point.
+    debounceDelay: 400,
+    inject: { reload: PresetReload },
+    handle: async (_operation, _events, { reload }) => {
+      await reload();
+    },
+  });
+
+  // Presets have to exist before the first command asks for them, and a watcher
+  // only reports *changes* — a file that was already there when the window
+  // opened never fires.
+  module.hostedServices.add({
+    id: 'quickUtils.presetLoad',
+    inject: { reload: PresetReload },
+    start: async (_context, { reload }) => {
+      await reload();
+    },
+  });
+
+  // The one place this extension reaches past the framework, declared so it is
+  // visible in the plan and released with the module. See `hover.ts` for why a
+  // hover provider is the case that earns it.
+  module.raw.register({
+    id: 'quickUtils.decodeHover',
+    // No `inject`: the module's ambient set already carries `l10n` and
+    // `logger`, and naming either again is a definition-time error rather than
+    // a shadowing rule.
+    bind: ({ registrations }, { l10n, logger }): undefined => {
+      registrations.own(registerDecodeHover(l10n, logger.withFields({ feature: 'hover' })));
+      return undefined;
+    },
+  });
+
+  module.hostedServices.add({
+    id: 'quickUtils.inspect',
+    inject: {
+      selectionStatus: SelectionStatus.token,
+      jsonStatus: JsonStatus.token,
+    },
+    start: (context, injected) => {
+      const watcher = watchInspectTargets(injected);
+      context.signal.addEventListener('abort', () => {
+        watcher.dispose();
       });
-    })
-  );
+    },
+  });
 
-  kit.disposables.push(new InspectFeature());
+  module.hostedServices.add({
+    id: 'quickUtils.favoritesCheckbox',
+    inject: { tools: Tools, log: Log },
+    start: (context, { tools, log }) => {
+      const subscription = tools.onDidChangeCheckboxState((changes) => {
+        void (async (): Promise<void> => {
+          for (const change of changes) {
+            const commandId = change.item.data?.command;
+            if (commandId !== undefined) {
+              await tools.setFavorite(commandId, change.checked);
+            }
+          }
+        })().catch((error: unknown) => {
+          log.error('Could not update favorites', error);
+        });
+      });
+      context.signal.addEventListener('abort', () => {
+        subscription.dispose();
+      });
+    },
+  });
 
   // ---- Commands ----------------------------------------------------------
 
-  const transformContext = { logger: logger.child('transform'), registry, history, lastTransform };
-  const generateContext = { logger: logger.child('generate'), history };
-  const hashContext = {
-    logger: logger.child('hash'),
-    history,
-    secrets,
-    defaultSecret,
-    globalState: context.globalState,
-  };
-  const regexContext = { context, logger: logger.child('regexTester'), client };
-  const replaceContext = { logger: logger.child('replace'), client };
+  /** What each family of features needs beyond the module's own set. */
+  const transforming = {
+    registry: Registry,
+    history: History,
+    lastTransform: LastTransformStorage.token,
+    status: StatusBar,
+  } as const;
+  const generating = { history: History, status: StatusBar } as const;
+  const hashing = {
+    history: History,
+    secrets: Secrets,
+    defaultSecret: DefaultSecret.token,
+    legacyAcknowledged: LegacyHashAcknowledged.token,
+    status: StatusBar,
+  } as const;
+  const testing = {
+    client: Regex,
+    status: StatusBar,
+    webviews: Webviews,
+    operations: Operations,
+    watchers: FileWatchers,
+    commands: Commands,
+  } as const;
+  const reporting = { history: History, secrets: Secrets, report: Report, build: Build } as const;
 
-  kit.disposables.push(
-    registerRegexTesterSerializer(regexContext),
-    registerScratchpad({ context, logger: logger.child('scratchpad'), registry }),
-    // Owns its own output channel and registers its own commands, so a failure
-    // while producing a diagnostic lands in the diagnostic channel.
-    registerDiagnostics({ context, history, secrets, kitVersion: KIT_VERSION })
-  );
+  /**
+   * Binds an editor feature to the dependencies its context is made of.
+   *
+   * The injected bag *is* the context — the module's ambient set plus whatever
+   * is named here. There is nothing left to assemble, which is what the five
+   * bundling services used to do.
+   */
+  const onEditor = <TDeps extends Record<string, ServiceToken<unknown>>, TContext>(
+    inject: TDeps,
+    run: (context: TContext, editor: ActiveEditor) => Promise<void> | void
+  ): {
+    inject: TDeps;
+    execute: (
+      operation: OperationContext,
+      editor: ActiveEditor,
+      args: readonly [],
+      injected: TContext
+    ) => Promise<void>;
+  } => ({
+    inject,
+    execute: async (_operation, editor, _args, injected): Promise<void> => {
+      await run(injected, editor);
+    },
+  });
+
+  module.commands.handleTextEditor(Cmd.Transform, onEditor(transforming, pickAndTransform));
+  module.commands.handleTextEditor(Cmd.TransformAgain, onEditor(transforming, transformAgain));
+  module.commands.handleTextEditor(Cmd.TransformPipeline, onEditor(transforming, runPipeline));
 
   /** Binds a per-transform command to its registry id. */
-  const transformCommand =
-    (id: string): TextEditorCommandHandler =>
-    (editor) =>
-      applyTransformById(transformContext, editor, id);
-
-  const editorCommands: Record<EditorCommandId, TextEditorCommandHandler> = {
-    [COMMANDS.TRANSFORM]: (editor) => pickAndTransform(transformContext, editor),
-    [COMMANDS.TRANSFORM_AGAIN]: (editor) => transformAgain(transformContext, editor),
-    [COMMANDS.TRANSFORM_PIPELINE]: (editor) => runPipeline(transformContext, editor),
-    [COMMANDS.REPLACE_MATCHES]: (editor) => replaceByPattern(replaceContext, editor),
-    [COMMANDS.EXTRACT_MATCHES]: (editor) => extractMatches(replaceContext, editor),
-
-    [COMMANDS.UPPER_CASE]: transformCommand('case.upper'),
-    [COMMANDS.LOWER_CASE]: transformCommand('case.lower'),
-    [COMMANDS.CAMEL_CASE]: transformCommand('case.camel'),
-    [COMMANDS.PASCAL_CASE]: transformCommand('case.pascal'),
-    [COMMANDS.SNAKE_CASE]: transformCommand('case.snake'),
-    [COMMANDS.KEBAB_CASE]: transformCommand('case.kebab'),
-    [COMMANDS.CONSTANT_CASE]: transformCommand('case.constant'),
-    [COMMANDS.TITLE_CASE]: transformCommand('case.title'),
-
-    [COMMANDS.BASE64_ENCODE]: transformCommand('codec.base64Encode'),
-    [COMMANDS.BASE64_DECODE]: transformCommand('codec.base64Decode'),
-    [COMMANDS.URL_ENCODE]: transformCommand('codec.urlEncode'),
-    [COMMANDS.URL_DECODE]: transformCommand('codec.urlDecode'),
-
-    [COMMANDS.SORT_LINES]: transformCommand('lines.sortAscending'),
-    [COMMANDS.DEDUPE_LINES]: transformCommand('lines.dedupe'),
-
-    [COMMANDS.JSON_FORMAT]: transformCommand('json.format'),
-    [COMMANDS.JSON_MINIFY]: transformCommand('json.minify'),
-    [COMMANDS.JSON_SORT_KEYS]: transformCommand('json.sortKeys'),
-
-    [COMMANDS.GENERATE_UUID]: (editor) => insertUuidV4(generateContext, editor),
-    [COMMANDS.GENERATE_UUID_V7]: (editor) => insertUuidV7(generateContext, editor),
-    [COMMANDS.GENERATE_PASSWORD]: (editor) => insertPassword(generateContext, editor),
-    [COMMANDS.GENERATE_LOREM]: (editor) => insertLorem(generateContext, editor),
-    [COMMANDS.INSERT_DATE]: (editor) => insertDateTime(generateContext, editor),
-    [COMMANDS.CONVERT_TIMESTAMP]: (editor) => convertTimestamp(generateContext, editor),
-
-    [COMMANDS.HASH]: (editor) => hashSelection(hashContext, editor),
-    [COMMANDS.HMAC]: (editor) => hmacSelection(hashContext, editor),
-    [COMMANDS.HMAC_DEFAULT]: (editor) => hmacWithDefaultSecret(hashContext, editor),
-
-    [COMMANDS.INSPECT]: (editor) => inspectSelection(editor),
+  const transformCommand = (contract: (typeof Cmd)['UpperCase'], id: string): undefined => {
+    module.commands.handleTextEditor(
+      contract,
+      onEditor(transforming, (context: TransformContext, editor) =>
+        applyTransformById(context, editor, id)
+      )
+    );
+    return undefined;
   };
 
-  const plainCommands: Record<PlainCommandId, CommandHandler> = {
-    [COMMANDS.TRANSFORM_CLIPBOARD]: () => transformClipboard(transformContext),
-    [COMMANDS.MANAGE_SECRETS]: () => manageSecrets(hashContext),
-    [COMMANDS.SET_DEFAULT_SECRET]: () => setDefaultSecret(hashContext),
-    [COMMANDS.OPEN_REGEX_TESTER]: () => openRegexTester(regexContext),
+  transformCommand(Cmd.UpperCase, 'case.upper');
+  transformCommand(Cmd.LowerCase, 'case.lower');
+  transformCommand(Cmd.CamelCase, 'case.camel');
+  transformCommand(Cmd.PascalCase, 'case.pascal');
+  transformCommand(Cmd.SnakeCase, 'case.snake');
+  transformCommand(Cmd.KebabCase, 'case.kebab');
+  transformCommand(Cmd.ConstantCase, 'case.constant');
+  transformCommand(Cmd.TitleCase, 'case.title');
+  transformCommand(Cmd.Base64Encode, 'codec.base64Encode');
+  transformCommand(Cmd.Base64Decode, 'codec.base64Decode');
+  transformCommand(Cmd.UrlEncode, 'codec.urlEncode');
+  transformCommand(Cmd.UrlDecode, 'codec.urlDecode');
+  transformCommand(Cmd.SortLines, 'lines.sortAscending');
+  transformCommand(Cmd.DedupeLines, 'lines.dedupe');
+  transformCommand(Cmd.JsonFormat, 'json.format');
+  transformCommand(Cmd.JsonMinify, 'json.minify');
+  transformCommand(Cmd.JsonSortKeys, 'json.sortKeys');
 
-    [COMMANDS.HISTORY_CLEAR]: async () => {
-      const confirmed = await confirm(l10n.t('Clear the operation history?'), {
+  module.commands.handleTextEditor(Cmd.GenerateUuid, onEditor(generating, insertUuidV4));
+  module.commands.handleTextEditor(Cmd.GenerateUuidV7, onEditor(generating, insertUuidV7));
+  module.commands.handleTextEditor(Cmd.GeneratePassword, onEditor(generating, insertPassword));
+  module.commands.handleTextEditor(Cmd.GenerateLorem, onEditor(generating, insertLorem));
+  module.commands.handleTextEditor(Cmd.InsertDate, onEditor(generating, insertDateTime));
+  module.commands.handleTextEditor(Cmd.ConvertTimestamp, onEditor(generating, convertTimestamp));
+
+  module.commands.handleTextEditor(Cmd.Hash, onEditor(hashing, hashSelection));
+  module.commands.handleTextEditor(Cmd.Hmac, onEditor(hashing, hmacSelection));
+  module.commands.handleTextEditor(Cmd.HmacDefault, onEditor(hashing, hmacWithDefaultSecret));
+  module.commands.handleTextEditor(Cmd.Inspect, onEditor({}, inspectSelection));
+  module.commands.handleTextEditor(Cmd.InspectDocument, onEditor(reporting, describeDocument));
+
+  // The one context injection cannot finish on its own: progress belongs to the
+  // operation, not to the container.
+  module.commands.handleTextEditor(Cmd.ReplaceMatches, {
+    inject: testing,
+    execute: (operation, editor, _args, injected: Omit<ReplaceContext, 'progress'>) =>
+      replaceByPattern({ ...injected, progress: operation.progress }, editor),
+  });
+
+  module.commands.handleTextEditor(Cmd.ExtractMatches, {
+    inject: testing,
+    execute: (operation, editor, _args, injected: Omit<ReplaceContext, 'progress'>) =>
+      extractMatches({ ...injected, progress: operation.progress }, editor),
+  });
+
+  module.commands.handle(Cmd.TransformClipboard, {
+    inject: transforming,
+    execute: (_operation, _args, context: TransformContext) => transformClipboard(context),
+  });
+
+  module.commands.handle(Cmd.ManageSecrets, {
+    inject: hashing,
+    execute: (_operation, _args, context: HashContext) => manageSecrets(context),
+  });
+
+  module.commands.handle(Cmd.SetDefaultSecret, {
+    inject: hashing,
+    execute: (_operation, _args, context: HashContext) => setDefaultSecret(context),
+  });
+
+  module.commands.handle(Cmd.OpenRegexTester, {
+    inject: testing,
+    execute: (_operation, _args, context: TesterServices) => openRegexTester(context),
+  });
+
+  module.commands.handle(Cmd.ReportState, {
+    inject: reporting,
+    execute: (_operation, _args, context: DiagnosticsContext) => reportState(context),
+  });
+
+  module.commands.handle(Cmd.CollectDiagnostics, {
+    inject: reporting,
+    execute: (_operation, _args, context: DiagnosticsContext) => collectDiagnostics(context),
+  });
+
+  module.commands.handle(Cmd.HistoryClear, {
+    inject: { history: History, view: HistoryView, status: StatusBar },
+    execute: async (_operation, _args, { notify, l10n, history, view, status }) => {
+      const confirmed = await notify.confirm(l10n.t('Clear the operation history?'), {
         detail: l10n.t('This cannot be undone.'),
         yesText: l10n.t('Clear'),
       });
       if (confirmed) {
         await history.clear();
-        historyProvider.resetPaging();
-        showStatusMessage(`$(check) ${l10n.t('History cleared')}`, 2000);
+        view.resetPaging();
+        status.flash('$(check) ' + l10n.t('History cleared'), 2000);
       }
     },
-    [COMMANDS.HISTORY_LOAD_MORE]: () => {
-      historyProvider.loadMore();
+  });
+
+  module.commands.handle(Cmd.HistoryLoadMore, {
+    inject: { view: HistoryView },
+    execute: (_operation, _args, { view }) => {
+      view.loadMore();
     },
-    [COMMANDS.HISTORY_COPY]: async (item: HistoryItem) => {
+  });
+
+  module.commands.handle(Cmd.HistoryCopy, {
+    inject: { status: StatusBar },
+    execute: async (_operation, [item], { notify, l10n, status }) => {
       const output = item.data?.output;
       if (output === undefined) {
-        await showError(l10n.t('That entry has no recorded output.'));
+        await notify.error(l10n.t('That entry has no recorded output.'));
         return;
       }
       await vscode.env.clipboard.writeText(output);
-      showStatusMessage(`$(clippy) ${l10n.t('Copied')}`, 1500);
+      status.flash('$(clippy) ' + l10n.t('Copied'), 1500);
     },
-    [COMMANDS.HISTORY_REAPPLY]: async (item: HistoryItem) => {
-      const editor = vscode.window.activeTextEditor;
+  });
+
+  module.commands.handle(Cmd.HistoryReapply, {
+    inject: transforming,
+    execute: async (_operation, [item], context: TransformContext) => {
+      const editor = context.editors.active;
       if (editor === undefined) {
-        await showError(l10n.t('Open a file first — there is no active editor.'));
+        await context.notify.error(context.l10n.t('Open a file first — there is no active editor.'));
         return;
       }
       const id = item.data?.id;
-      if (id === undefined || !registry.has(id)) {
-        await showError(l10n.t('That operation cannot be applied again.'));
+      if (id === undefined || !context.registry.has(id)) {
+        await context.notify.error(context.l10n.t('That operation cannot be applied again.'));
         return;
       }
-      await applyTransformById(transformContext, editor, id);
+      await applyTransformById(context, editor, id);
     },
+  });
 
-    [COMMANDS.TOOLS_RESET_FAVORITES]: async () => {
-      const confirmed = await confirm(l10n.t('Remove all favorites?'), {
+  module.commands.handle(Cmd.ToolsResetFavorites, {
+    inject: { favorites: Favorites, tools: Tools },
+    execute: async (_operation, _args, { notify, l10n, favorites, tools }) => {
+      const confirmed = await notify.confirm(l10n.t('Remove all favorites?'), {
         severity: 'info',
         yesText: l10n.t('Remove'),
       });
       if (confirmed) {
         await favorites.reset();
         // Removes the (now empty) Favorites group; expanded categories survive.
-        toolsProvider.syncFavorites();
+        tools.syncFavorites();
       }
     },
-  };
-
-  kit.registerTextEditorCommands(editorCommands);
-  kit.registerCommands(plainCommands);
-
-  logger.info('Activated', {
-    transforms: registry.all.length,
-    commands: Object.keys(editorCommands).length + Object.keys(plainCommands).length,
-    kit: KIT_VERSION,
   });
-}
 
-export function deactivate(): void {
-  // The kit disposes everything registered through it via
-  // context.subscriptions; only the singleton panel is held outside that.
+  // ---- Workspace presets -------------------------------------------------
+
+  const presetContext = { presets: Presets, reload: PresetReload, status: StatusBar } as const;
+
+  module.commands.handleTextEditor(Cmd.InsertPreset, {
+    inject: presetContext,
+    execute: (_operation, editor, _args, injected: PresetContext) =>
+      insertPreset(injected, editor),
+  });
+
+  module.commands.handle(Cmd.ReloadPresets, {
+    inject: presetContext,
+    execute: (_operation, _args, injected: PresetContext) => reloadPresets(injected),
+  });
+
+  module.commands.handle(Cmd.WatchFiles, {
+    inject: { watchers: FileWatchers, status: StatusBar },
+    execute: (operation, _args, injected: WatchContext) => watchFiles(injected, operation),
+  });
+
+  return undefined;
+});
+
+const app = defineExtension({ name: EXTENSION_NAME, modules: [quickUtils] });
+
+/**
+ * The compiled plan, for tests that run the application rather than the bundle.
+ *
+ * `createTestHost` binds this exact plan to fakes, so a test can start the whole
+ * thing without VS Code. Exporting it is what makes that possible — and it is
+ * the plan `activate` uses, so there is no second, test-shaped definition to
+ * keep in step with this one.
+ */
+export const plan: ApplicationPlan = app.plan;
+
+export const activate = app.activate;
+
+export async function deactivate(): Promise<void> {
   disposeRegexTester();
+  await app.deactivate();
 }

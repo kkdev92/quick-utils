@@ -6,20 +6,18 @@
 import * as vscode from 'vscode';
 import {
   BaseTreeDataProvider,
-  createGlobalStorage,
-  formatRelativeTime,
-  l10n,
   throttle,
   withPagination,
+  type LocalizationService,
   type Logger,
   type TreeItemData,
   type TypedStorage,
 } from '@kkdev92/vscode-ext-kit';
 
-import { COMMANDS, CONFIG, STORAGE } from '../core/constants';
-import { config } from '../core/config';
+import { COMMANDS, CONFIG } from '../core/constants';
+import type { Config } from '../core/config';
 import { translatable } from '../core/i18n';
-import { HISTORY_VERSION, historySchema, type HistoryData, type HistoryEntry } from '../core/types';
+import { HISTORY_VERSION, type HistoryData, type HistoryEntry } from '../core/types';
 
 /**
  * Maps the operation names written by 0.1.x onto current transform ids.
@@ -57,7 +55,7 @@ const LEGACY_KINDS = new Set(['transform', 'generate', 'json']);
  * yields an empty history instead of throwing, which would make every read
  * fall back to the default anyway.
  */
-function migrateFromV1(old: unknown): HistoryData {
+export function migrateFromV1(old: unknown): HistoryData {
   const entries: HistoryEntry[] = [];
 
   const legacyEntries = (old as { entries?: unknown }).entries;
@@ -98,19 +96,11 @@ export class HistoryStore implements vscode.Disposable {
   readonly onDidChange = this.emitter.event;
 
   constructor(
-    context: vscode.ExtensionContext,
+    storage: TypedStorage<HistoryData>,
+    private readonly config: Config,
     private readonly logger: Logger
   ) {
-    this.storage = createGlobalStorage<HistoryData>(context, STORAGE.HISTORY, {
-      defaultValue: { version: HISTORY_VERSION, entries: [] },
-      schema: historySchema,
-      version: HISTORY_VERSION,
-      migrations: { 1: migrateFromV1 },
-      // History is a per-machine convenience, and it can contain fragments of
-      // whatever the user was editing. Syncing it across machines would move
-      // that data off the machine it was produced on for no real benefit.
-      syncable: false,
-    });
+    this.storage = storage;
 
     // Surface corruption once, at startup, rather than silently serving the
     // default forever.
@@ -124,7 +114,7 @@ export class HistoryStore implements vscode.Disposable {
 
   /** Records an operation, evicting the oldest entries beyond the configured cap. */
   async add(entry: HistoryEntry): Promise<void> {
-    const limit = config.get(CONFIG.HISTORY_SIZE);
+    const limit = this.config.read().get(CONFIG.HISTORY_SIZE);
     if (limit === 0) {
       return;
     }
@@ -188,6 +178,7 @@ const NON_TRANSFORM_LABELS: Record<string, string> = {
  * translation to read as `SHA256`.
  */
 export function describeHistoryEntry(
+  l10n: LocalizationService,
   registry: { get(id: string): { label: string } | undefined },
   entry: HistoryEntry
 ): string {
@@ -233,6 +224,8 @@ export class HistoryTreeProvider extends BaseTreeDataProvider<HistoryItem> {
 
   constructor(
     private readonly store: HistoryStore,
+    private readonly config: Config,
+    private readonly l10n: LocalizationService,
     private readonly labelFor: (entry: HistoryEntry) => string
   ) {
     super();
@@ -244,12 +237,12 @@ export class HistoryTreeProvider extends BaseTreeDataProvider<HistoryItem> {
   getRoots(): HistoryItem[] {
     const entries = this.store.getAll();
     const items = entries.map((entry, index) => this.toItem(entry, index));
-    const pageSize = config.get(CONFIG.HISTORY_PAGE_SIZE) * this.page;
+    const pageSize = this.config.read().get(CONFIG.HISTORY_PAGE_SIZE) * this.page;
 
     // The command makes the "Load more…" row itself clickable (kit 2.1.0).
     return withPagination(items, pageSize, {
-      label: l10n.t('Load more…'),
-      command: { command: COMMANDS.HISTORY_LOAD_MORE, title: l10n.t('Load more…') },
+      label: this.l10n.t('Load more…'),
+      command: { command: COMMANDS.HISTORY_LOAD_MORE, title: this.l10n.t('Load more…') },
     });
   }
 
@@ -278,7 +271,7 @@ export class HistoryTreeProvider extends BaseTreeDataProvider<HistoryItem> {
     const tooltip = new vscode.MarkdownString();
     tooltip.appendMarkdown(`**${this.labelFor(entry)}**\n\n`);
     if (entry.file !== undefined) {
-      tooltip.appendMarkdown(`${l10n.t('File')}: \`${entry.file}\`\n\n`);
+      tooltip.appendMarkdown(`${this.l10n.t('File')}: \`${entry.file}\`\n\n`);
     }
     if (entry.output !== undefined) {
       // appendCodeblock escapes for us; appendMarkdown would let a stored
@@ -291,9 +284,9 @@ export class HistoryTreeProvider extends BaseTreeDataProvider<HistoryItem> {
       // millisecond, and tree item ids must be unique across the whole tree.
       id: `history:${String(entry.timestamp)}:${String(index)}`,
       label: this.labelFor(entry),
-      description: relativeTime(entry.timestamp),
+      description: relativeTime(this.l10n, entry.timestamp),
       tooltip,
-      iconPath: new vscode.ThemeIcon(KIND_ICONS[entry.kind]),
+      icon: KIND_ICONS[entry.kind],
       // Drives the `when` clauses on the row's context-menu items.
       contextValue: entry.output === undefined ? 'historyEntry' : 'historyEntryWithOutput',
       data: entry,
@@ -305,19 +298,19 @@ export class HistoryTreeProvider extends BaseTreeDataProvider<HistoryItem> {
  * Formats an age as localised relative time, picking the largest unit that
  * still reads naturally.
  */
-function relativeTime(timestamp: number, now = Date.now()): string {
+function relativeTime(l10n: LocalizationService, timestamp: number, now = Date.now()): string {
   const elapsed = Math.max(0, now - timestamp);
   const seconds = Math.floor(elapsed / 1000);
   if (seconds < 60) {
-    return formatRelativeTime(-seconds, 'second', 'narrow');
+    return l10n.relativeTime(-seconds, 'second', 'narrow');
   }
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) {
-    return formatRelativeTime(-minutes, 'minute', 'narrow');
+    return l10n.relativeTime(-minutes, 'minute', 'narrow');
   }
   const hours = Math.floor(minutes / 60);
   if (hours < 24) {
-    return formatRelativeTime(-hours, 'hour', 'narrow');
+    return l10n.relativeTime(-hours, 'hour', 'narrow');
   }
-  return formatRelativeTime(-Math.floor(hours / 24), 'day', 'narrow');
+  return l10n.relativeTime(-Math.floor(hours / 24), 'day', 'narrow');
 }

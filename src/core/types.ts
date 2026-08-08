@@ -6,8 +6,10 @@
  * something this one has to handle rather than trust.
  */
 
-import { s } from '@kkdev92/vscode-ext-kit';
-import type { StandardSchemaV1 } from '@kkdev92/vscode-ext-kit';
+import {
+  s,
+  type StandardSchemaV1,
+} from '@kkdev92/vscode-ext-kit';
 
 import type { CaseStyle } from '../lib/case';
 import type { CodecOperation } from '../lib/codec';

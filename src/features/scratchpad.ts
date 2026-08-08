@@ -16,13 +16,12 @@ import {
   escapeHtml,
   generateCSP,
   generateNonce,
-  l10n,
-  registerWebviewView,
+  type EditorService,
+  type LocalizationService,
   type Logger,
-  type ManagedWebviewView,
+  type ManagedWebview,
 } from '@kkdev92/vscode-ext-kit';
 
-import { VIEWS } from '../core/constants';
 import type { TransformRegistry } from '../core/transforms';
 import type { TransformKind } from '../core/types';
 // The RPC contract lives in a vscode-free module so the page script bundle is
@@ -41,64 +40,60 @@ const GROUP_ORDER: readonly TransformKind[] = ['case', 'codec', 'lines', 'json']
 
 /** Collaborators the scratchpad needs. */
 export interface ScratchpadContext {
-  context: vscode.ExtensionContext;
   logger: Logger;
   registry: TransformRegistry;
+  l10n: LocalizationService;
+  editors: EditorService;
 }
 
 /**
- * Registers the sidebar view.
+ * Fills the sidebar view in.
  *
- * `onResolve` runs again whenever VS Code recreates the view, so everything
- * per-instance — the HTML and the request handlers — is set up inside it.
+ * Runs again whenever VS Code recreates the view, so everything per-instance —
+ * the HTML and the request handlers — is set up here rather than once at
+ * activation. The registration itself is declared by the module.
  */
-export function registerScratchpad(context: ScratchpadContext): vscode.Disposable {
-  return registerWebviewView<ScratchpadSchema>(
-    context.context,
-    VIEWS.SCRATCHPAD,
-    (view) => {
-      view.setHtml(buildHtml(context, view));
+export function resolveScratchpad(
+  context: ScratchpadContext,
+  view: ManagedWebview<ScratchpadSchema>
+): void {
+  view.setHtml(buildHtml(context, view));
 
-      view.rpc.onRequest('transform', ({ id, input }) => {
-        const transform = context.registry.get(id);
-        if (transform === undefined) {
-          return { output: '', error: l10n.t('Unknown transform.') };
-        }
-        try {
-          return { output: transform.apply(input) };
-        } catch (error) {
-          return { output: '', error: error instanceof Error ? error.message : String(error) };
-        }
-      });
+  view.rpc.onRequest('transform', ({ id, input }) => {
+    const transform = context.registry.get(id);
+    if (transform === undefined) {
+      return { output: '', error: context.l10n.t('Unknown transform.') };
+    }
+    try {
+      return { output: transform.apply(input) };
+    } catch (error) {
+      return { output: '', error: error instanceof Error ? error.message : String(error) };
+    }
+  });
 
-      view.rpc.onRequest('copy', async ({ text }) => {
-        await vscode.env.clipboard.writeText(text);
-        return null;
-      });
+  view.rpc.onRequest('copy', async ({ text }) => {
+    await vscode.env.clipboard.writeText(text);
+    return null;
+  });
 
-      view.rpc.onRequest('insert', async ({ text }) => {
-        const editor = vscode.window.activeTextEditor;
-        if (editor === undefined) {
-          return {
-            inserted: false,
-            message: l10n.t('Open a file first — there is no active editor.'),
-          };
-        }
-        const inserted = await editor.edit((builder) => {
-          builder.replace(editor.selection, text);
-        });
-        return inserted
-          ? { inserted }
-          : {
-              inserted,
-              message: l10n.t('The editor rejected the edit. The file may be read-only.'),
-            };
-      });
+  view.rpc.onRequest('insert', async ({ text }) => {
+    const editor = context.editors.active;
+    if (editor === undefined) {
+      return {
+        inserted: false,
+        message: context.l10n.t('Open a file first — there is no active editor.'),
+      };
+    }
+    const inserted = await editor.transformSelection(() => text);
+    return inserted
+      ? { inserted }
+      : {
+          inserted,
+          message: context.l10n.t('The editor rejected the edit. The file may be read-only.'),
+        };
+  });
 
-      context.logger.debug('Scratchpad view resolved');
-    },
-    { enableScripts: true }
-  );
+  context.logger.debug('Scratchpad view resolved');
 }
 
 /**
@@ -108,14 +103,8 @@ export function registerScratchpad(context: ScratchpadContext): vscode.Disposabl
  * localised strings, and a translation containing an apostrophe or an angle
  * bracket must not be able to change the markup around it.
  */
-function buildHtml(
-  context: ScratchpadContext,
-  view: ManagedWebviewView<ScratchpadSchema>
-): string {
-  const webview = view.native.webview;
+function buildHtml(context: ScratchpadContext, view: ManagedWebview<ScratchpadSchema>): string {
   const nonce = generateNonce();
-  const media = vscode.Uri.joinPath(context.context.extensionUri, 'media', 'webview');
-  const bundles = vscode.Uri.joinPath(context.context.extensionUri, 'dist', 'webview');
 
   const options = GROUP_ORDER.flatMap((kind) => {
     const inGroup = context.registry.all.filter((transform) => transform.kind === kind);
@@ -123,42 +112,42 @@ function buildHtml(
       return [];
     }
     return [
-      `<optgroup label="${escapeHtml(l10n.t(GROUP_LABELS[kind]))}">`,
+      `<optgroup label="${escapeHtml(context.l10n.t(GROUP_LABELS[kind]))}">`,
       ...inGroup.map(
         (transform) =>
-          `<option value="${escapeHtml(transform.id)}">${escapeHtml(l10n.t(transform.label))}</option>`
+          `<option value="${escapeHtml(transform.id)}">${escapeHtml(context.l10n.t(transform.label))}</option>`
       ),
       '</optgroup>',
     ];
   }).join('\n');
 
   const body = `
-    <label class="label" for="transform">${escapeHtml(l10n.t('Transform'))}</label>
+    <label class="label" for="transform">${escapeHtml(context.l10n.t('Transform'))}</label>
     <select id="transform">
 ${options}
     </select>
 
-    <label class="label" for="input">${escapeHtml(l10n.t('Input'))}</label>
+    <label class="label" for="input">${escapeHtml(context.l10n.t('Input'))}</label>
     <textarea id="input" rows="5" spellcheck="false"></textarea>
 
-    <label class="label" for="output">${escapeHtml(l10n.t('Output'))}</label>
+    <label class="label" for="output">${escapeHtml(context.l10n.t('Output'))}</label>
     <textarea id="output" rows="5" spellcheck="false" readonly></textarea>
 
     <p id="status" class="status" role="status" aria-live="polite"></p>
 
     <div class="actions">
-      <button id="copy" type="button">${escapeHtml(l10n.t('Copy'))}</button>
-      <button id="insert" type="button" class="secondary">${escapeHtml(l10n.t('Insert at cursor'))}</button>
-      <button id="swap" type="button" class="secondary">${escapeHtml(l10n.t('Output → Input'))}</button>
+      <button id="copy" type="button">${escapeHtml(context.l10n.t('Copy'))}</button>
+      <button id="insert" type="button" class="secondary">${escapeHtml(context.l10n.t('Insert at cursor'))}</button>
+      <button id="swap" type="button" class="secondary">${escapeHtml(context.l10n.t('Output → Input'))}</button>
     </div>
   `;
 
   return createWebviewHtml({
-    title: l10n.t('Scratchpad'),
-    csp: generateCSP(webview, { nonce }),
-    styles: [webview.asWebviewUri(vscode.Uri.joinPath(media, 'scratchpad.css')).toString()],
+    title: context.l10n.t('Scratchpad'),
+    csp: generateCSP(view, { nonce }),
+    styles: [view.asWebviewUri('media/webview/scratchpad.css')],
     // Bundled from src/webview/scratchpad.ts; the kit's RPC client is inside.
-    scripts: [webview.asWebviewUri(vscode.Uri.joinPath(bundles, 'scratchpad.js')).toString()],
+    scripts: [view.asWebviewUri('dist/webview/scratchpad.js')],
     nonce,
     body,
   });
