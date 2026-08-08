@@ -10,17 +10,16 @@
 import * as vscode from 'vscode';
 import {
   SimpleTreeDataProvider,
-  createDragAndDropController,
-  createWorkspaceStorage,
-  l10n,
+  type LocalizationService,
   type Logger,
+  type TreeDragAndDropOptions,
   type TreeItemData,
   type TypedStorage,
 } from '@kkdev92/vscode-ext-kit';
 
-import { COMMANDS, STORAGE, TOOLS_DRAG_MIME } from '../core/constants';
+import { COMMANDS, TOOLS_DRAG_MIME } from '../core/constants';
 import { translatable } from '../core/i18n';
-import { favoritesSchema, type Favorites } from '../core/types';
+import { type Favorites } from '../core/types';
 import type { TransformRegistry } from '../core/transforms';
 
 /** One row in the Tools view. */
@@ -102,11 +101,8 @@ const TRANSFORM_GROUPS = [
 export class FavoritesStore {
   private readonly storage: TypedStorage<Favorites>;
 
-  constructor(context: vscode.ExtensionContext) {
-    this.storage = createWorkspaceStorage<Favorites>(context, STORAGE.FAVORITES, {
-      defaultValue: [],
-      schema: favoritesSchema,
-    });
+  constructor(storage: TypedStorage<Favorites>) {
+    this.storage = storage;
   }
 
   get(): Favorites {
@@ -140,6 +136,7 @@ export class ToolsTreeProvider extends SimpleTreeDataProvider<ToolItem> {
   constructor(
     registry: TransformRegistry,
     private readonly favorites: FavoritesStore,
+    private readonly l10n: LocalizationService,
     private readonly logger: Logger
   ) {
     super();
@@ -244,8 +241,8 @@ export class ToolsTreeProvider extends SimpleTreeDataProvider<ToolItem> {
 
     const groups: ToolItem[] = this.categories.map((category) => ({
       id: category.id,
-      label: l10n.t(category.label),
-      iconPath: new vscode.ThemeIcon(category.icon),
+      label: this.l10n.t(category.label),
+      icon: category.icon,
       contextValue: 'category',
       collapsibleState: vscode.TreeItemCollapsibleState.Collapsed,
       children: category.tools.map((tool) => this.toToolItem(tool)),
@@ -262,8 +259,8 @@ export class ToolsTreeProvider extends SimpleTreeDataProvider<ToolItem> {
   private buildFavoritesGroup(children: ToolItem[]): ToolItem {
     return {
       id: FAVORITES_GROUP_ID,
-      label: l10n.t('Favorites'),
-      iconPath: new vscode.ThemeIcon('star-full'),
+      label: this.l10n.t('Favorites'),
+      icon: 'star-full',
       contextValue: 'favorites',
       collapsibleState: vscode.TreeItemCollapsibleState.Expanded,
       children,
@@ -283,11 +280,11 @@ export class ToolsTreeProvider extends SimpleTreeDataProvider<ToolItem> {
   private toToolItem(tool: ToolEntry): ToolItem {
     return {
       id: `${TOOL_PREFIX}${tool.command}`,
-      label: l10n.t(tool.label),
-      iconPath: new vscode.ThemeIcon(tool.icon),
+      label: this.l10n.t(tool.label),
+      icon: tool.icon,
       contextValue: 'tool',
       checkboxState: this.checkboxFor(tool.command),
-      command: { command: tool.command, title: l10n.t(tool.label) },
+      command: { command: tool.command, title: this.l10n.t(tool.label) },
       data: { command: tool.command },
     };
   }
@@ -297,10 +294,10 @@ export class ToolsTreeProvider extends SimpleTreeDataProvider<ToolItem> {
       // A distinct id from the category row: the same command appears twice in
       // the tree, and VS Code requires ids to be unique tree-wide.
       id: `${FAVORITE_PREFIX}${tool.command}`,
-      label: l10n.t(tool.label),
-      iconPath: new vscode.ThemeIcon(tool.icon),
+      label: this.l10n.t(tool.label),
+      icon: tool.icon,
       contextValue: 'favorite',
-      command: { command: tool.command, title: l10n.t(tool.label) },
+      command: { command: tool.command, title: this.l10n.t(tool.label) },
       data: { command: tool.command },
     };
   }
@@ -333,9 +330,9 @@ function toCommandId(itemId: string): string | undefined {
  */
 export function createToolsDragAndDrop(
   provider: ToolsTreeProvider
-): vscode.TreeDragAndDropController<ToolItem> {
-  return createDragAndDropController<ToolItem>({
+): TreeDragAndDropOptions<ToolItem> {
+  return {
     mimeType: TOOLS_DRAG_MIME,
     onDrop: (sourceIds, target) => provider.reorderFavorites(sourceIds, target?.id),
-  });
+  };
 }

@@ -12,7 +12,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { COMMANDS, CONFIG, EXTENSION_ID, REGEX_TESTER_VIEW_TYPE, VIEWS } from '../../src/core/constants';
+import { assertManifestMatches } from '@kkdev92/vscode-ext-kit/testing';
+
+import * as Contracts from '../../src/core/commands';
+import { Settings } from '../../src/core/config';
+import { COMMANDS, EXTENSION_ID, REGEX_TESTER_VIEW_TYPE, VIEWS } from '../../src/core/constants';
 
 interface Manifest {
   name: string;
@@ -35,22 +39,24 @@ const nlsEnglish = JSON.parse(
 ) as Record<string, string>;
 
 const declaredCommands = new Set(manifest.contributes.commands.map((entry) => entry.command));
-const declaredSettings = new Set(Object.keys(manifest.contributes.configuration.properties));
+
+/**
+ * Everything `src` is the authority for, in one call.
+ *
+ * `EditorSettings` is deliberately not listed: it reads VS Code's own `editor.*`
+ * section, which this extension does not contribute and must not be told to.
+ */
+describe('what src declares', () => {
+  it('is what package.json contributes', () => {
+    assertManifestMatches(manifest, {
+      settings: [Settings],
+      commands: Object.values(Contracts),
+      views: Object.values(VIEWS),
+    });
+  });
+});
 
 describe('commands', () => {
-  it('declares every command the code knows about', () => {
-    for (const command of Object.values(COMMANDS)) {
-      expect(declaredCommands).toContain(command);
-    }
-  });
-
-  it('declares no command the code does not implement', () => {
-    const known = new Set<string>(Object.values(COMMANDS));
-    for (const command of declaredCommands) {
-      expect(known).toContain(command);
-    }
-  });
-
   it('namespaces every command under the extension id', () => {
     for (const command of declaredCommands) {
       expect(command.startsWith(`${EXTENSION_ID}.`)).toBe(true);
@@ -72,19 +78,6 @@ describe('commands', () => {
 });
 
 describe('settings', () => {
-  it('declares every key the config schema reads', () => {
-    for (const key of Object.values(CONFIG)) {
-      expect(declaredSettings).toContain(`${EXTENSION_ID}.${key}`);
-    }
-  });
-
-  it('declares no setting the config schema does not read', () => {
-    const known = new Set(Object.values(CONFIG).map((key) => `${EXTENSION_ID}.${key}`));
-    for (const key of declaredSettings) {
-      expect(known).toContain(key);
-    }
-  });
-
   it('localises every setting description', () => {
     for (const property of Object.values(manifest.contributes.configuration.properties)) {
       const description = (property as { description?: string }).description;

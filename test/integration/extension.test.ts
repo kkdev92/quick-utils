@@ -31,8 +31,10 @@ const bundlePath = join(__dirname, '../../dist/extension.js');
 const require = createRequire(import.meta.url);
 
 interface ExtensionModule {
-  activate(context: unknown): void;
-  deactivate(): void;
+  // Both are async under v3: the host starts and stops modules in order, and
+  // VS Code awaits each. A test that forgets to await sees nothing registered.
+  activate(context: unknown): Promise<void>;
+  deactivate(): Promise<void>;
 }
 
 /** `Module._load` is not in @types/node's public surface. */
@@ -54,7 +56,7 @@ function registeredCommands(): string[] {
   return calls.map((call) => String(call[0]));
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   if (!existsSync(bundlePath)) {
     throw new Error(`${bundlePath} is missing. Run \`npm run bundle\` first.`);
   }
@@ -70,17 +72,16 @@ beforeAll(() => {
   extension = require(bundlePath) as ExtensionModule;
 
   context = createMockExtensionContext(vi);
-  // The real manifest, so `checkPackageJsonSync` compares the config schema
-  // against what ships rather than against an empty object.
+  // The real manifest, so the state report has a version to print.
   (context.extension as { packageJSON: unknown }).packageJSON = JSON.parse(
     readFileSync(join(__dirname, '../../package.json'), 'utf8')
   );
 
-  extension.activate(context);
+  await extension.activate(context);
 });
 
-afterAll(() => {
-  extension.deactivate();
+afterAll(async () => {
+  await extension.deactivate();
   for (const subscription of context.subscriptions) {
     subscription.dispose();
   }
@@ -139,18 +140,25 @@ describe('activate', () => {
     expect(viewTypes).toContain('quickUtils.regexTester');
   });
 
-  it('opens the main channel as a LogOutputChannel and the diagnostics one as plain', () => {
+  it('opens only the main channel at activation, as a LogOutputChannel', () => {
     const calls = vscodeMock.window.createOutputChannel.mock.calls;
-    expect(calls.map((call) => String(call[0]))).toEqual([
-      'Quick Utils',
-      'Quick Utils (diagnostics)',
-    ]);
-
-    // The main channel gets `{ log: true }`, so the Output panel's level
-    // selector applies to it. The diagnostics channel deliberately does not:
-    // "send me the logs" must not be filtered by a setting the user forgot.
+    // v2 opened both here. Under v3 the diagnostics channel is a service, and
+    // services are created on first use — so an install that never collects a
+    // report never puts a second entry in the Output dropdown.
+    expect(calls.map((call) => String(call[0]))).toEqual(['Quick Utils']);
+    // The Output panel's level selector applies to this one.
     expect(calls[0]?.[1]).toMatchObject({ log: true });
-    expect(calls[1]?.[1]).toBeUndefined();
+  });
+
+  it('opens the diagnostics channel as plain, when something first writes to it', async () => {
+    await vscodeMock.commands.executeCommand(COMMANDS.COLLECT_DIAGNOSTICS);
+
+    const calls = vscodeMock.window.createOutputChannel.mock.calls;
+    const diagnostics = calls.find((call) => String(call[0]).includes('diagnostics'));
+    expect(diagnostics).toBeDefined();
+    // Deliberately not `{ log: true }`: "send me the logs" must not be
+    // filtered by a level the user forgot they set.
+    expect(diagnostics?.[1]).toBeUndefined();
   });
 
   it('registers its disposables with the extension context', () => {

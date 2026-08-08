@@ -6,40 +6,29 @@
  * is one undo and one entry in the undo stack's label.
  */
 
-import * as vscode from 'vscode';
 import {
   WizardStepError,
-  applyWorkspaceEdits,
-  getLine,
-  getTextInOffsetRange,
   inputStep,
-  inputText,
   isCancellation,
-  l10n,
-  plural,
   quickpickStep,
-  resolvePositionsBatch,
-  showError,
-  showInfo,
-  showStatusMessage,
-  toAbortSignal,
   toPickItem,
-  transformSelection,
-  withSteps,
-  wizard,
-  type Logger,
+  type ActiveEditor,
+  type StatusBarService,
+  type TextRange,
 } from '@kkdev92/vscode-ext-kit';
+
+import type { ProgressServices } from '../core/services';
 
 import { CONFIG, MATCH_CONTEXT_CHARS, REGEX_MATCH_LIMIT } from '../core/constants';
 import { translatable } from '../core/i18n';
-import { config } from '../core/config';
 import { RegexError, compileRegex, expandReplacement, type RegexMatch } from '../lib/regex';
 import { RegexTimeoutError, type RegexClient } from '../regex/client';
 
 /** Collaborators the replace command needs. */
-export interface ReplaceContext {
-  logger: Logger;
+export interface ReplaceContext extends ProgressServices {
   client: RegexClient;
+  /** Short-lived confirmations, in the corner. */
+  status: StatusBarService;
 }
 
 /** Optional flags offered in the wizard. `g` is always applied by the scanner. */
@@ -53,19 +42,19 @@ const FLAGS = [
 /** Asks for a pattern, flags and replacement, then applies it. */
 export async function replaceByPattern(
   context: ReplaceContext,
-  editor: vscode.TextEditor
+  editor: ActiveEditor
 ): Promise<void> {
   let answers;
   try {
-    answers = await wizard()
+    answers = await context.ask.wizard()
       .step(
         'pattern',
         inputStep({
-          prompt: l10n.t('Regular expression'),
-          placeholder: l10n.t('e.g. (\\w+)@example\\.com'),
+          prompt: context.l10n.t('Regular expression'),
+          placeholder: context.l10n.t('e.g. (\\w+)@example\\.com'),
           validate: (value) => {
             if (value.length === 0) {
-              return l10n.t('Enter a pattern.');
+              return context.l10n.t('Enter a pattern.');
             }
             try {
               compileRegex(value, 'g');
@@ -80,12 +69,12 @@ export async function replaceByPattern(
         'flags',
         quickpickStep({
           canPickMany: true,
-          placeholder: l10n.t('Flags (optional)'),
+          placeholder: context.l10n.t('Flags (optional)'),
           matchOnDescription: true,
           items: () =>
             FLAGS.map((entry) =>
               toPickItem(entry.flag, {
-                label: l10n.t(entry.label),
+                label: context.l10n.t(entry.label),
                 description: entry.description,
               })
             ),
@@ -94,14 +83,14 @@ export async function replaceByPattern(
       .step(
         'replacement',
         inputStep({
-          prompt: l10n.t('Replacement — $1, $<name> and $& are expanded'),
+          prompt: context.l10n.t('Replacement — $1, $<name> and $& are expanded'),
         })
       )
-      .run({ title: l10n.t('Replace by Pattern') });
+      .run({ title: context.l10n.t('Replace by Pattern') });
   } catch (error) {
     if (error instanceof WizardStepError) {
-      context.logger.error(error, { step: error.atKey });
-      await showError(l10n.t('Could not read the replacement options.'));
+      context.logger.error('Wizard step failed', error, { step: error.atKey });
+      await context.notify.error(context.l10n.t('Could not read the replacement options.'));
       return;
     }
     throw error;
@@ -112,13 +101,16 @@ export async function replaceByPattern(
   }
 
   const { pattern, flags, replacement } = answers.value;
-  const document = editor.document;
-  const text = document.getText();
-  const timeoutMs = config.get(CONFIG.REGEX_TIMEOUT);
+  const text = editor.text();
+  const timeoutMs = context.config.read().get(CONFIG.REGEX_TIMEOUT);
 
   // Non-empty selections narrow the operation; with none, the whole document is
   // in scope.
-  const scopes = editor.selections.filter((selection) => !selection.isEmpty);
+  const scopes = editor.selections.filter(
+    (selection) =>
+      selection.start.line !== selection.end.line ||
+      selection.start.character !== selection.end.character
+  );
 
   const scan = await scanDocument(context, {
     pattern,
@@ -130,21 +122,21 @@ export async function replaceByPattern(
     return;
   }
 
-  const matches = scopes.length === 0 ? scan.matches : withinScopes(document, scan.matches, scopes);
+  const matches = scopes.length === 0 ? scan.matches : withinScopes(editor, scan.matches, scopes);
 
   if (matches.length === 0) {
-    await showInfo(l10n.t('No matches.'));
+    await context.notify.info(context.l10n.t('No matches.'));
     return;
   }
 
-  const counted = plural(matches.length, {
-    one: l10n.t('Replace {count} match?'),
-    other: l10n.t('Replace {count} matches?'),
+  const counted = context.l10n.plural(matches.length, {
+    one: context.l10n.t('Replace {count} match?'),
+    other: context.l10n.t('Replace {count} matches?'),
   });
-  const proceed = await showInfo(scan.truncated ? `${counted} ${truncatedNote()}` : counted, {
+  const proceed = await context.notify.info(scan.truncated ? `${counted} ${truncatedNote(context.l10n)}` : counted, {
     modal: true,
-    detail: preview(editor, matches, replacement),
-    actions: [{ title: l10n.t('Replace'), value: 'replace' as const }],
+    detail: preview(editor, context.l10n, matches, replacement),
+    actions: [{ title: context.l10n.t('Replace'), value: 'replace' as const }],
   });
   if (proceed !== 'replace') {
     return;
@@ -153,29 +145,34 @@ export async function replaceByPattern(
   // Every match's start and end resolved in one pass, rather than two
   // `positionAt` calls per match.
   const offsets = matches.flatMap((match) => [match.index, match.index + match.text.length]);
-  const positions = resolvePositionsBatch(document, offsets);
-
-  const applied = await applyWorkspaceEdits(
-    matches.map((match, index) => ({
-      uri: document.uri,
-      range: new vscode.Range(
-        positions[index * 2] as vscode.Position,
-        positions[index * 2 + 1] as vscode.Position
-      ),
-      newText: expandReplacement(replacement, match),
-    })),
-    { label: l10n.t('Replace by pattern'), isRefactoring: true }
-  );
-
-  if (!applied) {
-    await showError(l10n.t('The editor rejected the edit. The file may be read-only.'));
+  const positions = editor.positionsAt(offsets);
+  const location = editor.location();
+  if (location === undefined) {
+    await context.notify.error(context.l10n.t('Save the file before replacing across it.'));
     return;
   }
 
-  showStatusMessage(
-    `$(replace-all) ${plural(matches.length, {
-      one: l10n.t('{count} replacement'),
-      other: l10n.t('{count} replacements'),
+  const applied = await context.editors.editFiles(
+    matches.map((match, index) => ({
+      uri: location.uri,
+      range: {
+        start: positions[index * 2] as (typeof positions)[number],
+        end: positions[index * 2 + 1] as (typeof positions)[number],
+      },
+      text: expandReplacement(replacement, match),
+    })),
+    { label: context.l10n.t('Replace by pattern'), isRefactoring: true }
+  );
+
+  if (!applied) {
+    await context.notify.error(context.l10n.t('The editor rejected the edit. The file may be read-only.'));
+    return;
+  }
+
+  context.status.flash(
+    `$(replace-all) ${context.l10n.plural(matches.length, {
+      one: context.l10n.t('{count} replacement'),
+      other: context.l10n.t('{count} replacements'),
     })}`,
     2500
   );
@@ -192,11 +189,14 @@ async function scanDocument(
   request: { pattern: string; flags: string; text: string; timeoutMs: number }
 ): Promise<{ matches: RegexMatch[]; truncated: boolean } | undefined> {
   try {
-    const outcome = await withSteps(
-      { title: l10n.t('Replace by Pattern'), cancellable: true },
+    const outcome = await context.progress.steps(
+      { title: context.l10n.t('Replace by Pattern'), cancellable: true },
       {
-        label: l10n.t('Scanning'),
-        task: (token) =>
+        label: context.l10n.t('Scanning'),
+        // The signal is the operation's: the progress UI's cancel button, the
+        // command being cancelled and the extension stopping all reach the
+        // worker the same way.
+        run: (signal) =>
           context.client.run(
             {
               pattern: request.pattern,
@@ -205,14 +205,14 @@ async function scanDocument(
               limit: REGEX_MATCH_LIMIT,
             },
             request.timeoutMs,
-            toAbortSignal(token)
+            signal
           ),
       }
     );
 
-    // Since kit 2.1.0, a cancellation *during* the scan also comes back as
-    // `cancelled: true` — only real failures (an invalid pattern, a timeout)
-    // still reject into the catch below.
+    // A cancellation *during* the scan also comes back as `cancelled: true` —
+    // only real failures (an invalid pattern, a timeout) reject into the catch
+    // below.
     const [result] = outcome.results;
     return outcome.cancelled ? undefined : result;
   } catch (error) {
@@ -223,13 +223,15 @@ async function scanDocument(
 
 /** Keeps only matches that fall entirely inside one of the selections. */
 function withinScopes(
-  document: vscode.TextDocument,
+  editor: ActiveEditor,
   matches: readonly RegexMatch[],
-  scopes: readonly vscode.Selection[]
+  scopes: readonly TextRange[]
 ): RegexMatch[] {
-  const ranges = scopes.map((scope) => ({
-    start: document.offsetAt(scope.start),
-    end: document.offsetAt(scope.end),
+  // Both ends of every scope in one pass, rather than a lookup per offset.
+  const offsets = editor.offsetsAt(scopes.flatMap((scope) => [scope.start, scope.end]));
+  const ranges = scopes.map((_scope, index) => ({
+    start: offsets[index * 2] ?? 0,
+    end: offsets[index * 2 + 1] ?? 0,
   }));
 
   return matches.filter((match) => {
@@ -238,7 +240,7 @@ function withinScopes(
   });
 }
 
-function truncatedNote(): string {
+function truncatedNote(l10n: ProgressServices['l10n']): string {
   return l10n.t('(only the first {0} matches were collected)', String(REGEX_MATCH_LIMIT));
 }
 
@@ -251,27 +253,33 @@ function truncatedNote(): string {
  * to show, so it falls back to a fixed window of characters either side.
  */
 function preview(
-  editor: vscode.TextEditor,
+  editor: ActiveEditor,
+  l10n: ProgressServices['l10n'],
   matches: readonly RegexMatch[],
   replacement: string
 ): string {
   const shown = matches.slice(0, 3);
+  const positions = editor.positionsAt(
+    shown.flatMap((match) => [match.index, match.index + match.text.length])
+  );
 
-  const lines = shown.map((match) => {
-    const start = editor.document.positionAt(match.index);
-    const end = editor.document.positionAt(match.index + match.text.length);
+  const lines = shown.map((match, index) => {
+    const start = positions[index * 2];
+    const end = positions[index * 2 + 1];
+    if (start === undefined || end === undefined) {
+      return '';
+    }
 
-    const context =
+    const snippet =
       start.line === end.line
-        ? getLine(editor, start.line).trim()
-        : `…${getTextInOffsetRange(
-            editor.document,
+        ? editor.line(start.line).trim()
+        : `…${editor.textOfOffsets(
             Math.max(0, match.index - MATCH_CONTEXT_CHARS),
             match.index + match.text.length + MATCH_CONTEXT_CHARS
           )}…`;
 
     return [
-      `${l10n.t('Line {0}', String(start.line + 1))}: ${truncate(context, 72)}`,
+      `${l10n.t('Line {0}', String(start.line + 1))}: ${truncate(snippet, 72)}`,
       `  ${truncate(match.text)} → ${truncate(expandReplacement(replacement, match))}`,
     ].join('\n');
   });
@@ -297,8 +305,8 @@ async function reportScanFailure(
     return;
   }
   if (error instanceof RegexTimeoutError) {
-    await showError(
-      l10n.t(
+    await context.notify.error(
+      context.l10n.t(
         'The pattern did not finish within {0}ms. It is probably backtracking — try anchoring it or making a quantifier less greedy.',
         String(timeoutMs)
       )
@@ -306,11 +314,11 @@ async function reportScanFailure(
     return;
   }
   if (error instanceof RegexError) {
-    await showError(error.message);
+    await context.notify.error(error.message);
     return;
   }
-  context.logger.error(error);
-  await showError(l10n.t('The pattern could not be run.'));
+  context.logger.error('Regex scan failed', error);
+  await context.notify.error(context.l10n.t('The pattern could not be run.'));
 }
 
 /**
@@ -328,19 +336,20 @@ async function reportScanFailure(
  */
 export async function extractMatches(
   context: ReplaceContext,
-  editor: vscode.TextEditor
+  editor: ActiveEditor
 ): Promise<void> {
-  if (editor.selection.isEmpty) {
-    await showError(l10n.t('Select the text to extract from.'));
+  const subject = editor.selectedText();
+  if (subject === '') {
+    await context.notify.error(context.l10n.t('Select the text to extract from.'));
     return;
   }
 
-  const pattern = await inputText({
-    prompt: l10n.t('Regular expression'),
-    placeHolder: l10n.t('e.g. https?://\\S+'),
+  const pattern = await context.ask.text({
+    prompt: context.l10n.t('Regular expression'),
+    placeHolder: context.l10n.t('e.g. https?://\\S+'),
     validate: (value) => {
       if (value.length === 0) {
-        return l10n.t('Enter a pattern.');
+        return context.l10n.t('Enter a pattern.');
       }
       try {
         compileRegex(value, 'g');
@@ -354,8 +363,7 @@ export async function extractMatches(
     return;
   }
 
-  const timeoutMs = config.get(CONFIG.REGEX_TIMEOUT);
-  const subject = editor.document.getText(editor.selection);
+  const timeoutMs = context.config.read().get(CONFIG.REGEX_TIMEOUT);
 
   let scan;
   try {
@@ -369,7 +377,7 @@ export async function extractMatches(
   }
 
   if (scan.matches.length === 0) {
-    await showInfo(l10n.t('No matches.'));
+    await context.notify.info(context.l10n.t('No matches.'));
     return;
   }
 
@@ -380,16 +388,16 @@ export async function extractMatches(
 
   // The matching already happened, in the worker; the callback only has to hand
   // back what replaces the selection.
-  if (!(await transformSelection(editor, () => extracted))) {
-    await showError(l10n.t('The editor rejected the edit. The file may be read-only.'));
+  if (!(await editor.transformSelection(() => extracted))) {
+    await context.notify.error(context.l10n.t('The editor rejected the edit. The file may be read-only.'));
     return;
   }
 
-  showStatusMessage(
-    `$(list-selection) ${plural(scan.matches.length, {
-      one: l10n.t('{count} match extracted'),
-      other: l10n.t('{count} matches extracted'),
-    })}${scan.truncated ? ` · ${truncatedNote()}` : ''}`,
+  context.status.flash(
+    `$(list-selection) ${context.l10n.plural(scan.matches.length, {
+      one: context.l10n.t('{count} match extracted'),
+      other: context.l10n.t('{count} matches extracted'),
+    })}${scan.truncated ? ` · ${truncatedNote(context.l10n)}` : ''}`,
     2500
   );
 }

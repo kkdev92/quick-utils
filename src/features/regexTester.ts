@@ -11,44 +11,31 @@
 import * as vscode from 'vscode';
 import {
   DisposableCollection,
-  createFileWatcher,
-  createWebviewPanel,
-  executeCommand,
   generateCSP,
   generateNonce,
-  inputText,
-  l10n,
-  loadHtmlTemplate,
-  plural,
-  registerWebviewPanelSerializer,
   s,
-  selectRange,
-  showWarn,
-  toAbortSignal,
   validateSchema,
-  watchFile,
-  withProgress,
-  type Logger,
+  type ManagedFileWatcher,
   type ManagedWebviewPanel,
 } from '@kkdev92/vscode-ext-kit';
 
 import { CONFIG, EXTENSION_ID, REGEX_MATCH_LIMIT, REGEX_TESTER_VIEW_TYPE } from '../core/constants';
-import { config } from '../core/config';
+import type { TesterServices } from '../core/services';
 import { RegexError } from '../lib/regex';
-import { RegexTimeoutError, type RegexClient } from '../regex/client';
+import { RegexTimeoutError } from '../regex/client';
 // The RPC contract lives in a vscode-free module so the page script bundle is
 // typed against the exact same interfaces — see src/webview/protocol.ts.
 import type { RegexTesterSchema, Subject } from '../webview/protocol';
 
 /** Formats the match count, noting when the collection was cut short. */
-function summarise(count: number, truncated: boolean): string {
-  const counted = plural(count, {
-    zero: l10n.t('No matches'),
-    one: l10n.t('{count} match'),
-    other: l10n.t('{count} matches'),
+function summarise(context: TesterServices, count: number, truncated: boolean): string {
+  const counted = context.l10n.plural(count, {
+    zero: context.l10n.t('No matches'),
+    one: context.l10n.t('{count} match'),
+    other: context.l10n.t('{count} matches'),
   });
   return truncated
-    ? `${counted} · ${l10n.t('stopped at the first {0}', String(REGEX_MATCH_LIMIT))}`
+    ? `${counted} · ${context.l10n.t('stopped at the first {0}', String(REGEX_MATCH_LIMIT))}`
     : counted;
 }
 
@@ -65,56 +52,41 @@ const testParamsSchema = s.object({
   input: s.string(),
 });
 
-/** Collaborators the tester needs. */
-export interface RegexTesterContext {
-  context: vscode.ExtensionContext;
-  logger: Logger;
-  client: RegexClient;
-}
-
 type TesterPanel = ManagedWebviewPanel<RegexTesterSchema>;
 
 /** At most one tester panel exists; a second invocation reveals the first. */
 let current: TesterPanel | undefined;
 
 /** Opens the tester, or reveals it if already open. */
-export async function openRegexTester(context: RegexTesterContext): Promise<void> {
+export async function openRegexTester(context: TesterServices): Promise<void> {
   if (current !== undefined) {
     current.reveal(vscode.ViewColumn.Beside);
     return;
   }
 
-  const panel = createWebviewPanel<RegexTesterSchema>(context.context, {
+  const panel = context.webviews.openPanel<RegexTesterSchema>({
     viewType: REGEX_TESTER_VIEW_TYPE,
-    title: l10n.t('Regex Tester'),
+    title: context.l10n.t('Regex Tester'),
     column: vscode.ViewColumn.Beside,
     enableScripts: true,
   });
 
-  await initialise(context, panel);
+  await initialiseRegexTester(context, panel);
 }
 
 /**
- * Restores the panel after a window reload.
+ * Wires up a fresh (or restored) panel: HTML, RPC handlers, teardown.
  *
- * Requires the `onWebviewPanel:` activation event in the manifest; without it
- * VS Code has nothing to reactivate and the panel is dropped.
+ * Exported because the restore path comes from `module.webviews.restorePanel`
+ * rather than from here — the webview restores its own pattern and subject via
+ * `setState`/`getState`, so a restored panel needs nothing replayed, only the
+ * same wiring.
  */
-export function registerRegexTesterSerializer(context: RegexTesterContext): vscode.Disposable {
-  return registerWebviewPanelSerializer<RegexTesterSchema>(
-    context.context,
-    REGEX_TESTER_VIEW_TYPE,
-    async (panel) => {
-      // The webview restores its own pattern and subject from
-      // `setState`/`getState`, so nothing needs to be replayed from here.
-      current?.dispose();
-      await initialise(context, panel);
-    }
-  );
-}
-
-/** Wires up a fresh (or restored) panel: HTML, RPC handlers, teardown. */
-async function initialise(context: RegexTesterContext, panel: TesterPanel): Promise<void> {
+export async function initialiseRegexTester(
+  context: TesterServices,
+  panel: TesterPanel
+): Promise<void> {
+  current?.dispose();
   current = panel;
 
   /** The document a subject was taken from, so matches can be revealed in it. */
@@ -135,23 +107,18 @@ async function initialise(context: RegexTesterContext, panel: TesterPanel): Prom
   });
 
   const nonce = generateNonce();
-  // `loadHtmlTemplate` rather than the panel's `setHtmlFromTemplate` wrapper:
-  // the same work, but the HTML is a value here, which is what lets the webview
-  // be re-rendered later without recreating the panel.
-  panel.setHtml(
-    await loadHtmlTemplate(context.context, 'media/webview/regex-tester.html', panel.native.webview, {
-      csp: generateCSP(panel.native.webview, { nonce }),
-      nonce,
-      title: l10n.t('Regex Tester'),
-      patternLabel: l10n.t('Pattern'),
-      flagsLabel: l10n.t('Flags'),
-      subjectLabel: l10n.t('Subject text'),
-      fromEditorLabel: l10n.t('From editor'),
-      fromFileLabel: l10n.t('From file…'),
-      fromGlobLabel: l10n.t('From glob…'),
-      noMatchesLabel: l10n.t('No matches'),
-    })
-  );
+  await panel.setHtmlFromTemplate('media/webview/regex-tester.html', {
+    csp: generateCSP(panel, { nonce }),
+    nonce,
+    title: context.l10n.t('Regex Tester'),
+    patternLabel: context.l10n.t('Pattern'),
+    flagsLabel: context.l10n.t('Flags'),
+    subjectLabel: context.l10n.t('Subject text'),
+    fromEditorLabel: context.l10n.t('From editor'),
+    fromFileLabel: context.l10n.t('From file…'),
+    fromGlobLabel: context.l10n.t('From glob…'),
+    noMatchesLabel: context.l10n.t('No matches'),
+  });
 
   panel.rpc.onRequest('test', async (params) => {
     const validated = validateSchema(testParamsSchema, params);
@@ -159,7 +126,12 @@ async function initialise(context: RegexTesterContext, panel: TesterPanel): Prom
       context.logger.warn('Rejected a malformed test request from the webview', {
         issues: validated.issues.map((issue) => issue.message),
       });
-      return { matches: [], truncated: false, summary: '', error: l10n.t('Invalid request.') };
+      return {
+        matches: [],
+        truncated: false,
+        summary: '',
+        error: context.l10n.t('Invalid request.'),
+      };
     }
 
     const { pattern, flags, input } = validated.value;
@@ -167,61 +139,68 @@ async function initialise(context: RegexTesterContext, panel: TesterPanel): Prom
       return { matches: [], truncated: false, summary: '' };
     }
 
-    const timeoutMs = config.get(CONFIG.REGEX_TIMEOUT);
+    const timeoutMs = context.config.read().get(CONFIG.REGEX_TIMEOUT);
     try {
-      const { matches, truncated } = await context.client.run(
-        { pattern, flags, input, limit: REGEX_MATCH_LIMIT },
-        timeoutMs
+      // An operation of its own: the scan needs a signal that dies with the
+      // extension, and an RPC handler is not a command so nothing hands it one.
+      const { matches, truncated } = await context.operations.run(
+        'regexTester.test',
+        (operation) =>
+          context.client.run(
+            { pattern, flags, input, limit: REGEX_MATCH_LIMIT },
+            timeoutMs,
+            operation.signal
+          )
       );
-      return { matches, truncated, summary: summarise(matches.length, truncated) };
+      return { matches, truncated, summary: summarise(context, matches.length, truncated) };
     } catch (error) {
       if (error instanceof RegexTimeoutError) {
-        void warnAboutTimeout(context.logger, timeoutMs);
+        void warnAboutTimeout(context, timeoutMs);
         return { matches: [], truncated: false, summary: '', error: error.message };
       }
       if (error instanceof RegexError) {
         return { matches: [], truncated: false, summary: '', error: error.message };
       }
-      context.logger.error(error);
+      context.logger.error('The regex tester could not run a pattern', error);
       return {
         matches: [],
         truncated: false,
         summary: '',
-        error: l10n.t('The pattern could not be run.'),
+        error: context.l10n.t('The pattern could not be run.'),
       };
     }
   });
 
   panel.rpc.onRequest('loadFromEditor', () => {
-    // The tester itself is not a text editor, so `activeTextEditor` already
-    // points at the document beside it; `visibleTextEditors` covers the case
-    // where focus is in the panel and nothing else is active.
-    const source = vscode.window.activeTextEditor ?? vscode.window.visibleTextEditors[0];
-    if (source === undefined) {
+    // The tester itself is not a text editor, so the active editor already
+    // points at the document beside it.
+    const source = context.editors.active;
+    const location = source?.location();
+    if (source === undefined || location === undefined) {
       return null;
     }
 
-    const selection = source.document.getText(source.selection);
-    boundDocument = source.document.uri;
+    const selection = source.selectedText();
+    boundDocument = vscode.Uri.parse(location.uri.toString());
     subjectSources.dispose();
 
     return {
-      name: source.document.uri.path.split('/').pop() ?? l10n.t('editor'),
-      text: selection.length > 0 ? selection : source.document.getText(),
+      name: location.uri.path.split('/').pop() ?? context.l10n.t('editor'),
+      text: selection.length > 0 ? selection : source.text(),
     };
   });
 
   panel.rpc.onRequest('loadFromFile', async () => {
     const picked = await vscode.window.showOpenDialog({
       canSelectMany: false,
-      openLabel: l10n.t('Use as subject'),
+      openLabel: context.l10n.t('Use as subject'),
     });
     const uri = picked?.[0];
     if (uri === undefined) {
       return null;
     }
 
-    const subject = await readSubject(uri);
+    const subject = await readSubject(context, uri);
     if (subject === undefined) {
       return null;
     }
@@ -241,11 +220,12 @@ async function initialise(context: RegexTesterContext, panel: TesterPanel): Prom
   });
 
   panel.rpc.onRequest('loadFromGlob', async () => {
-    const glob = await inputText({
-      prompt: l10n.t('Glob pattern, relative to the workspace'),
+    const glob = await context.ask.text({
+      prompt: context.l10n.t('Glob pattern, relative to the workspace'),
       placeHolder: 'logs/**/*.log',
       value: '**/*.log',
-      validate: (value) => (value.trim().length === 0 ? l10n.t('Enter a pattern.') : undefined),
+      validate: (value) =>
+        value.trim().length === 0 ? context.l10n.t('Enter a pattern.') : undefined,
     });
     if (glob === undefined) {
       return null;
@@ -263,20 +243,19 @@ async function initialise(context: RegexTesterContext, panel: TesterPanel): Prom
     // a rotating log directory produces bursts of events across many paths, and
     // re-reading every file once per burst is the point of the debounce.
     subjectSources.dispose();
-    const watcher = createFileWatcher({
+    const watcher = context.watchers.watch({
       patterns: glob.trim(),
       ignorePatterns: ['**/node_modules/**', '**/.git/**'],
       debounceDelay: 500,
       maxBatchSize: 200,
     });
-    const rereadGlob = async (): Promise<void> => {
-      const updated = await readGlob(context, glob.trim());
-      if (updated !== undefined) {
-        panel.rpc.emit('subject', updated);
-      }
-    };
     watcher.onDidChange((): void => {
-      void rereadGlob();
+      void (async (): Promise<void> => {
+        const updated = await readGlob(context, glob.trim());
+        if (updated !== undefined) {
+          panel.rpc.emit('subject', updated);
+        }
+      })();
     });
     subjectSources.add(watcher);
 
@@ -292,11 +271,12 @@ async function initialise(context: RegexTesterContext, panel: TesterPanel): Prom
       viewColumn: vscode.ViewColumn.One,
       preserveFocus: true,
     });
-    selectRange(editor, new vscode.Range(document.positionAt(index), document.positionAt(index + length)));
-    editor.revealRange(
-      new vscode.Range(document.positionAt(index), document.positionAt(index + length)),
-      vscode.TextEditorRevealType.InCenterIfOutsideViewport
+    const range = new vscode.Range(
+      document.positionAt(index),
+      document.positionAt(index + length)
     );
+    editor.selection = new vscode.Selection(range.start, range.end);
+    editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
     return null;
   });
 
@@ -306,23 +286,26 @@ async function initialise(context: RegexTesterContext, panel: TesterPanel): Prom
 }
 
 /** Reads a file as the subject, under a progress notification. */
-async function readSubject(uri: vscode.Uri): Promise<Subject | undefined> {
-  return withProgress(
-    l10n.t('Loading subject text…'),
-    async (progress, token) => {
-      const signal = toAbortSignal(token);
-      progress.report({ message: uri.path.split('/').pop() });
+async function readSubject(
+  context: TesterServices,
+  uri: vscode.Uri
+): Promise<Subject | undefined> {
+  return context.operations.run('regexTester.readSubject', (operation) =>
+    operation.progress.run(
+      { title: context.l10n.t('Loading subject text…'), cancellable: true },
+      async (progress, signal) => {
+        progress.report({ message: uri.path.split('/').pop() ?? '' });
 
-      const bytes = await vscode.workspace.fs.readFile(uri);
-      if (signal.aborted) {
-        return undefined;
+        const bytes = await vscode.workspace.fs.readFile(uri);
+        if (signal.aborted) {
+          return undefined;
+        }
+        return {
+          name: uri.path.split('/').pop() ?? context.l10n.t('file'),
+          text: new TextDecoder().decode(bytes),
+        };
       }
-      return {
-        name: uri.path.split('/').pop() ?? l10n.t('file'),
-        text: new TextDecoder().decode(bytes),
-      };
-    },
-    { cancellable: true }
+    )
   );
 }
 
@@ -340,95 +323,93 @@ const GLOB_FILE_LIMIT = 50;
  * Each file is prefixed with its relative path, so a match found in the tester
  * can be traced back to where it came from.
  */
-async function readGlob(
-  context: RegexTesterContext,
-  glob: string
-): Promise<Subject | undefined> {
+async function readGlob(context: TesterServices, glob: string): Promise<Subject | undefined> {
   const found = await vscode.workspace.findFiles(glob, '**/node_modules/**', GLOB_FILE_LIMIT);
   if (found.length === 0) {
-    await showWarn(l10n.t('No files matched that pattern.'));
+    await context.notify.warn(context.l10n.t('No files matched that pattern.'));
     return undefined;
   }
 
-  return withProgress(
-    l10n.t('Loading subject text…'),
-    async (progress, token) => {
-      const signal = toAbortSignal(token);
-      const parts: string[] = [];
+  return context.operations.run('regexTester.readGlob', (operation) =>
+    operation.progress.run(
+      { title: context.l10n.t('Loading subject text…'), cancellable: true },
+      async (progress, signal) => {
+        const parts: string[] = [];
 
-      for (const [index, uri] of found.entries()) {
-        if (signal.aborted) {
-          return undefined;
-        }
-        progress.report({
-          message: vscode.workspace.asRelativePath(uri),
-          increment: 100 / found.length,
-        });
-        try {
-          const bytes = await vscode.workspace.fs.readFile(uri);
-          parts.push(
-            `# ${vscode.workspace.asRelativePath(uri)}\n${new TextDecoder().decode(bytes)}`
-          );
-        } catch (error) {
-          // A file that vanished between the scan and the read is not worth
-          // failing the whole subject over.
-          context.logger.debug('Skipped a file while building a glob subject', {
-            index,
-            error: String(error),
+        for (const [index, uri] of found.entries()) {
+          if (signal.aborted) {
+            return undefined;
+          }
+          progress.report({
+            message: vscode.workspace.asRelativePath(uri),
+            increment: 100 / found.length,
           });
+          try {
+            const bytes = await vscode.workspace.fs.readFile(uri);
+            parts.push(
+              `# ${vscode.workspace.asRelativePath(uri)}\n${new TextDecoder().decode(bytes)}`
+            );
+          } catch (error) {
+            // A file that vanished between the scan and the read is not worth
+            // failing the whole subject over.
+            context.logger.debug('Skipped a file while building a glob subject', {
+              index,
+              error: String(error),
+            });
+          }
         }
-      }
 
-      return {
-        name: plural(parts.length, {
-          one: l10n.t('{count} file'),
-          other: l10n.t('{count} files'),
-        }),
-        text: parts.join('\n\n'),
-      };
-    },
-    { cancellable: true }
+        return {
+          name: context.l10n.plural(parts.length, {
+            one: context.l10n.t('{count} file'),
+            other: context.l10n.t('{count} files'),
+          }),
+          text: parts.join('\n\n'),
+        };
+      }
+    )
   );
 }
 
 /** Re-reads the subject file when it changes on disk. */
 function watchSubjectFile(
-  context: RegexTesterContext,
+  context: TesterServices,
   uri: vscode.Uri,
   onChange: (subject: Subject) => void
-): vscode.Disposable {
-  const reread = async (): Promise<void> => {
-    try {
-      const bytes = await vscode.workspace.fs.readFile(uri);
-      onChange({
-        name: uri.path.split('/').pop() ?? l10n.t('file'),
-        text: new TextDecoder().decode(bytes),
-      });
-    } catch (error) {
-      // The file may have been deleted, or replaced while half-written; the
-      // subject already on screen stays as it is.
-      context.logger.debug('Could not re-read the subject file', { error: String(error) });
-    }
-  };
+): ManagedFileWatcher {
+  const watcher = context.watchers.watch({
+    patterns: uri.path,
+    debounceDelay: 300,
+    events: ['change'],
+  });
 
-  return watchFile(
-    uri,
-    (): void => {
-      void reread();
-    },
-    300
-  );
+  watcher.onDidChange((): void => {
+    void (async (): Promise<void> => {
+      try {
+        const bytes = await vscode.workspace.fs.readFile(uri);
+        onChange({
+          name: uri.path.split('/').pop() ?? context.l10n.t('file'),
+          text: new TextDecoder().decode(bytes),
+        });
+      } catch (error) {
+        // The file may have been deleted, or replaced while half-written; the
+        // subject already on screen stays as it is.
+        context.logger.debug('Could not re-read the subject file', { error: String(error) });
+      }
+    })();
+  });
+
+  return watcher;
 }
 
 /** Points at the setting, since raising it is the only real remedy. */
-async function warnAboutTimeout(logger: Logger, timeoutMs: number): Promise<void> {
-  const action = await showWarn(
-    l10n.t('The pattern did not finish within {0}ms and was abandoned.', String(timeoutMs)),
-    { actions: [{ title: l10n.t('Open setting'), value: 'settings' as const }] }
+async function warnAboutTimeout(context: TesterServices, timeoutMs: number): Promise<void> {
+  const action = await context.notify.warn(
+    context.l10n.t('The pattern did not finish within {0}ms and was abandoned.', String(timeoutMs)),
+    { actions: [{ title: context.l10n.t('Open setting'), value: 'settings' as const }] }
   );
   if (action === 'settings') {
-    await executeCommand(
-      logger,
+    await context.commands.execute(
       'workbench.action.openSettings',
       `${EXTENSION_ID}.${CONFIG.REGEX_TIMEOUT}`
     );

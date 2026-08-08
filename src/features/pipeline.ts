@@ -12,16 +12,9 @@
  * keeps that from becoming N entries in the undo stack.
  */
 
-import * as vscode from 'vscode';
 import {
-  applyEditsGrouped,
-  getAllSelectedText,
-  l10n,
-  pickMany,
-  plural,
-  showError,
-  showStatusMessage,
   withTiming,
+  type ActiveEditor,
 } from '@kkdev92/vscode-ext-kit';
 
 import type { TransformDescriptor } from '../core/types';
@@ -38,11 +31,11 @@ import type { TransformContext } from './transform';
  */
 export async function runPipeline(
   context: TransformContext,
-  editor: vscode.TextEditor
+  editor: ActiveEditor
 ): Promise<void> {
-  const picked = await pickMany(buildPickEntries(context.registry), {
-    placeHolder: l10n.t('Select transforms to run in sequence'),
-    prompt: l10n.t('Applied top to bottom, in the order shown here.'),
+  const picked = await context.ask.many(buildPickEntries(context.l10n, context.registry), {
+    placeHolder: context.l10n.t('Select transforms to run in sequence'),
+    prompt: context.l10n.t('Applied top to bottom, in the order shown here.'),
   });
   if (picked === undefined || picked.length === 0) {
     return;
@@ -62,20 +55,20 @@ export async function runPipeline(
   // between stages would be impossible to predict.
   const first = stages[0] as TransformDescriptor;
   if (!ensureSelection(editor, first.kind)) {
-    await showError(l10n.t('Select some text first.'));
+    await context.notify.error(context.l10n.t('Select some text first.'));
     return;
   }
 
   // Dry run before touching the document, for the same reason a single
   // transform does: a stage that rejects its input must not leave the earlier
   // stages applied.
-  const failure = dryRun(getAllSelectedText(editor), stages);
+  const failure = dryRun(editor.selectedTexts(), stages);
   if (failure !== undefined) {
-    await showError(
-      l10n.t(
+    await context.notify.error(
+      context.l10n.t(
         'Stage {0} ({1}) failed: {2}',
         String(failure.stage + 1),
-        l10n.t(failure.transform.label),
+        context.l10n.t(failure.transform.label),
         failure.detail
       )
     );
@@ -88,29 +81,35 @@ export async function runPipeline(
 
   const { result: applied, duration } = await withTiming(
     'pipeline',
-    () =>
-      applyEditsGrouped(
-        editor,
-        stages.map((stage) => (builder: vscode.TextEditorEdit): void => {
-          // Read inside the callback: the previous stage's edit has already been
-          // applied, so both the selections and their text are current.
-          for (const selection of editor.selections) {
-            builder.replace(selection, stage.apply(editor.document.getText(selection)));
-          }
-        })
-      ),
+    async () => {
+      // One edit per stage, in order: a stage has to see the document the
+      // previous one left behind, so the text is read fresh each time rather
+      // than resolved up front against the original.
+      //
+      // NOTE (kit 3.0.0-alpha.0): v2's `applyEditsGrouped` made these N calls
+      // land as a single undo step. `singleUndoStep` is either "one call, one
+      // step" or "N calls, N steps", so a pipeline of three transforms is now
+      // three undos instead of one.
+      for (const stage of stages) {
+        const ok = await editor.transformSelections((text) => stage.apply(text));
+        if (!ok) {
+          return false;
+        }
+      }
+      return true;
+    },
     { logger: context.logger }
   );
 
   if (!applied) {
-    await showError(l10n.t('The editor rejected the edit. The file may be read-only.'));
+    await context.notify.error(context.l10n.t('The editor rejected the edit. The file may be read-only.'));
     return;
   }
 
-  showStatusMessage(
-    `$(check) ${plural(stages.length, {
-      one: l10n.t('{count} transform'),
-      other: l10n.t('{count} transforms'),
+  context.status.flash(
+    `$(check) ${context.l10n.plural(stages.length, {
+      one: context.l10n.t('{count} transform'),
+      other: context.l10n.t('{count} transforms'),
     })} · ${String(Math.round(duration))}ms`,
     2500
   );

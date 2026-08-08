@@ -1,46 +1,27 @@
 /**
  * Diagnostics: the state report, and a verbose channel to collect it into.
  *
- * This feature owns its own logger rather than sharing the extension's. The
- * main channel is a `LogOutputChannel`, where the *user's* level selector in the
- * Output panel decides what is visible — which is right for normal logging and
- * wrong for "collect everything you know, I am filing a bug". A `'plain'`
+ * This feature writes to its own output channel rather than the extension's.
+ * The extension's is a `LogOutputChannel`, where the *user's* level selector in
+ * the Output panel decides what is visible — which is right for normal logging
+ * and wrong for "collect everything you know, I am filing a bug". A plain
  * channel has no such gate, so what this writes is what the user can copy.
- *
- * Its commands are registered against that logger too, so a failure while
- * producing a diagnostic report is reported in the diagnostic channel rather
- * than in the one the user was already reading.
  */
 
 import * as vscode from 'vscode';
 import {
-  DisposableCollection,
-  createLogger,
   formatDateFor,
   formatNumberFor,
   formatRelativeTimeFor,
-  getFilePath,
-  listStorageKeys,
   pluralFor,
-  registerCommands,
-  registerTextEditorCommands,
-  run,
-  tryRun,
-  unwrapOr,
-  type Logger,
+  type ActiveEditor,
   type SecretStore,
 } from '@kkdev92/vscode-ext-kit';
 
-import { COMMANDS, CONFIG, EXTENSION_ID, EXTENSION_NAME, STORAGE } from '../core/constants';
-import { config } from '../core/config';
+import { CONFIG, EXTENSION_ID, EXTENSION_NAME, STORAGE } from '../core/constants';
+import type { Services } from '../core/services';
 import { textStats } from '../lib/text';
 import type { HistoryStore } from './history';
-
-/** Commands this feature registers itself, rather than through the kit's map. */
-export type DiagnosticsCommandId =
-  | typeof COMMANDS.REPORT_STATE
-  | typeof COMMANDS.COLLECT_DIAGNOSTICS
-  | typeof COMMANDS.INSPECT_DOCUMENT;
 
 /**
  * Locale the report is written in.
@@ -52,12 +33,52 @@ export type DiagnosticsCommandId =
  */
 const REPORT_LOCALE = 'en-US';
 
+/** Versions the report names. Values, not collaborators. */
+export interface BuildInfo {
+  readonly extensionVersion: string;
+  readonly kitVersion: string;
+}
+
 /** Collaborators the report needs. */
-export interface DiagnosticsContext {
-  context: vscode.ExtensionContext;
-  history: HistoryStore;
-  secrets: SecretStore;
-  kitVersion: string;
+export interface DiagnosticsContext extends Services {
+  readonly history: HistoryStore;
+  readonly secrets: SecretStore;
+  readonly report: ReportChannel;
+  readonly build: BuildInfo;
+}
+
+/**
+ * The plain output channel the report is collected into.
+ *
+ * A thin wrapper so the feature does not have to know it is a VS Code channel,
+ * which is also what makes the report testable without a window.
+ */
+export interface ReportChannel {
+  write(line: string): void;
+  show(): void;
+  dispose(): void;
+}
+
+/**
+ * Creates the plain channel.
+ *
+ * Plain rather than a `LogOutputChannel` on purpose: the Output panel's level
+ * selector does not apply to it, so a user asked to "send the logs" gets all of
+ * them.
+ */
+export function createReportChannel(): ReportChannel {
+  const channel = vscode.window.createOutputChannel(`${EXTENSION_NAME} (diagnostics)`);
+  return {
+    write: (line: string): void => {
+      channel.appendLine(line);
+    },
+    show: (): void => {
+      channel.show(true);
+    },
+    dispose: (): void => {
+      channel.dispose();
+    },
+  };
 }
 
 /**
@@ -66,8 +87,8 @@ export interface DiagnosticsContext {
  * "The default" and "you set this in the workspace" produce identical values
  * and completely different bug reports.
  */
-function originOf(key: Parameters<typeof config.inspect>[0]): string {
-  const inspection = config.inspect(key);
+function originOf(context: DiagnosticsContext, key: keyof typeof CONFIG): string {
+  const inspection = context.config.inspect(CONFIG[key]);
   if (inspection === undefined) {
     return 'unknown';
   }
@@ -106,35 +127,32 @@ function describeAge(elapsedMs: number): string {
 }
 
 /** Builds the report body. */
-async function buildReport(context: DiagnosticsContext, logger: Logger): Promise<string> {
-  const extensionVersion =
-    (context.context.extension.packageJSON as { version?: string }).version ?? 'unknown';
-
-  const settings = Object.values(CONFIG).map((key) => {
-    // tryGet rather than get: a setting that fails validation is exactly the
-    // kind of thing this report exists to surface.
-    const result = config.tryGet(key);
-    const value = unwrapOr(result, undefined as never);
-    const note = result.ok
-      ? originOf(key)
-      : `INVALID — ${result.error.map((issue) => issue.message).join('; ')}`;
-    return `| \`${EXTENSION_ID}.${key}\` | \`${JSON.stringify(value)}\` | ${note} |`;
+export async function buildReport(context: DiagnosticsContext): Promise<string> {
+  const snapshot = context.config.read();
+  const settings = (Object.keys(CONFIG) as (keyof typeof CONFIG)[]).map((name) => {
+    const key = CONFIG[name];
+    // A value that fails validation never reaches here as garbage: the lenient
+    // policy substitutes the default and records a diagnostic, so what the
+    // report shows is what the extension is actually running on.
+    const value = snapshot.get(key);
+    return `| \`${EXTENSION_ID}.${key}\` | \`${JSON.stringify(value)}\` | ${originOf(context, name)} |`;
   });
-
-  const globalKeys = listStorageKeys(context.context.globalState, `${EXTENSION_ID}.`);
-  const workspaceKeys = listStorageKeys(context.context.workspaceState, `${EXTENSION_ID}.`);
 
   // Reading the keychain can fail — a locked keyring on Linux is the usual
   // reason — and a report that aborts there is worth less than one that says so.
-  const secretKeys = await tryRun(logger, 'List secret names', () => context.secrets.keys());
-  const secretCount = secretKeys.ok
-    ? pluralFor(REPORT_LOCALE, secretKeys.value.length, {
-        one: '{count} secret',
-        other: '{count} secrets',
-      })
-    : 'unavailable (the keychain could not be read)';
-
-  const missingFromManifest = config.checkPackageJsonSync(context.context);
+  let secretCount: string;
+  try {
+    const keys = await context.secrets.keys();
+    secretCount = pluralFor(REPORT_LOCALE, keys.length, {
+      one: '{count} secret',
+      other: '{count} secrets',
+    });
+  } catch (error) {
+    context.logger.warn('Could not list secret names for the report', {
+      error: String(error),
+    });
+    secretCount = 'unavailable (the keychain could not be read)';
+  }
 
   // "The last thing that ran was 3 days ago" separates "this broke just now"
   // from "this has never worked for me" without asking a follow-up question.
@@ -152,33 +170,28 @@ Generated ${formatDateFor(REPORT_LOCALE, new Date(), { dateStyle: 'medium', time
 
 | | |
 | --- | --- |
-| Extension | ${extensionVersion} |
-| \`@kkdev92/vscode-ext-kit\` | ${context.kitVersion} |
+| Extension | ${context.build.extensionVersion} |
+| \`@kkdev92/vscode-ext-kit\` | ${context.build.kitVersion} |
 | VS Code | ${vscode.version} |
 | Platform | ${process.platform} ${process.arch} |
 | Node | ${process.versions.node} |
-| Display language | ${vscode.env.language} |
+| Display language | ${context.l10n.language} |
 
 ## Settings
 
 | Setting | Value | Source |
 | --- | --- | --- |
 ${settings.join('\n')}
-${
-  missingFromManifest.length === 0
-    ? ''
-    : `\n> Declared in the config schema but missing from \`package.json\`: ${missingFromManifest
-        .map((key) => `\`${key}\``)
-        .join(', ')}\n`
-}
+
 ## Stored data
 
 | | |
 | --- | --- |
 | History entries | ${formatNumberFor(REPORT_LOCALE, context.history.count)} |
 | Last operation | ${lastOperation} |
-| Global state keys | ${globalKeys.length === 0 ? '—' : globalKeys.map((key) => `\`${key}\``).join(', ')} |
-| Workspace state keys | ${workspaceKeys.length === 0 ? '—' : workspaceKeys.map((key) => `\`${key}\``).join(', ')} |
+| Declared storage keys | ${Object.values(STORAGE)
+    .map((key) => `\`${key}\``)
+    .join(', ')} |
 | Stored secrets | ${secretCount} |
 
 Secret *values* are held in the OS keychain and are never read by this report.
@@ -191,76 +204,32 @@ editor's display language, so two reports can be compared directly.*
 `;
 }
 
-/**
- * Registers the diagnostics commands and the channel they write to.
- *
- * @returns A disposable owning the channel and the command registrations.
- */
-export function registerDiagnostics(context: DiagnosticsContext): vscode.Disposable {
-  const scope = new DisposableCollection();
-
-  // `channelMode: 'plain'` with an explicit level: the Output panel's own level
-  // selector does not apply, so a user asked to "send the logs" gets all of them.
-  const logger = createLogger(`${EXTENSION_NAME} (diagnostics)`, {
-    channelMode: 'plain',
-    level: 'trace',
-    showOnError: false,
+/** Opens the report as an untitled markdown document. */
+export async function reportState(context: DiagnosticsContext): Promise<void> {
+  const report = await buildReport(context);
+  const document = await vscode.workspace.openTextDocument({
+    content: report,
+    language: 'markdown',
   });
-  scope.add(logger);
+  await vscode.window.showTextDocument(document, { preview: false });
+  context.logger.info('State report generated');
+}
 
-  const handlers: Record<
-    typeof COMMANDS.REPORT_STATE | typeof COMMANDS.COLLECT_DIAGNOSTICS,
-    () => Promise<void>
-  > = {
-    [COMMANDS.REPORT_STATE]: async () => {
-      const report = await run(logger, 'Generate state report', () =>
-        buildReport(context, logger)
-      );
-      if (report === undefined) {
-        return;
-      }
-      const document = await vscode.workspace.openTextDocument({
-        content: report,
-        language: 'markdown',
-      });
-      await vscode.window.showTextDocument(document, { preview: false });
-      logger.info('State report generated');
-    },
+/** Writes the report to the plain channel and puts it on the clipboard. */
+export async function collectDiagnostics(context: DiagnosticsContext): Promise<void> {
+  const report = await buildReport(context);
 
-    [COMMANDS.COLLECT_DIAGNOSTICS]: async () => {
-      const report = await run(logger, 'Collect diagnostics', () => buildReport(context, logger));
-      if (report === undefined) {
-        return;
-      }
-      // Written to the plain channel so the user can select and copy it whole,
-      // including the trace lines the main channel may be hiding.
-      logger.info('--- state report ---');
-      for (const line of report.split('\n')) {
-        logger.info(line);
-      }
-      logger.info('--- end of state report ---');
-      await vscode.env.clipboard.writeText(report);
-      logger.info('Report copied to the clipboard');
-    },
-  };
-
-  for (const disposable of Object.values(
-    registerCommands(context.context, logger, handlers)
-  )) {
-    scope.add(disposable);
+  // Written to the plain channel so the user can select and copy it whole,
+  // including what the main channel's level selector may be hiding.
+  context.report.write('--- state report ---');
+  for (const line of report.split('\n')) {
+    context.report.write(line);
   }
+  context.report.write('--- end of state report ---');
+  context.report.show();
 
-  for (const disposable of Object.values(
-    registerTextEditorCommands(context.context, logger, {
-      [COMMANDS.INSPECT_DOCUMENT]: (editor: vscode.TextEditor) => {
-        describeDocument(logger, editor);
-      },
-    })
-  )) {
-    scope.add(disposable);
-  }
-
-  return scope;
+  await vscode.env.clipboard.writeText(report);
+  context.logger.info('Report copied to the clipboard');
 }
 
 /**
@@ -269,23 +238,22 @@ export function registerDiagnostics(context: DiagnosticsContext): vscode.Disposa
  * Aimed at "the transform did something strange to my file": encoding, line
  * endings and size explain most of those before anyone reads any code.
  */
-function describeDocument(logger: Logger, editor: vscode.TextEditor): void {
-  const document = editor.document;
-  const text = document.getText();
-  const stats = textStats(text, vscode.env.language);
-  const location = getFilePath(editor);
+export function describeDocument(context: DiagnosticsContext, editor: ActiveEditor): void {
+  const text = editor.text();
+  const stats = textStats(text, context.l10n.language);
+  const location = editor.location();
 
-  logger.info('--- document ---');
-  logger.info(`path: ${location?.fsPath ?? '(untitled)'}`);
-  logger.info(`scheme: ${location?.uri.scheme ?? document.uri.scheme}`);
-  logger.info(`language: ${document.languageId}`);
-  logger.info(`line ending: ${document.eol === vscode.EndOfLine.CRLF ? 'CRLF' : 'LF'}`);
-  logger.info(`dirty: ${String(document.isDirty)}`);
-  logger.info(
+  context.report.write('--- document ---');
+  context.report.write(`path: ${location?.fsPath ?? '(untitled)'}`);
+  context.report.write(`scheme: ${location?.uri.scheme ?? '(none)'}`);
+  // `\r\n` anywhere means the file is CRLF; VS Code normalises per document.
+  context.report.write(`line ending: ${text.includes('\r\n') ? 'CRLF' : 'LF'}`);
+  context.report.write(
     `size: ${formatNumberFor(REPORT_LOCALE, stats.bytes)} bytes, ` +
       `${formatNumberFor(REPORT_LOCALE, stats.lines)} lines, ` +
       `${formatNumberFor(REPORT_LOCALE, stats.graphemes)} characters`
   );
-  logger.info(`selections: ${String(editor.selections.length)}`);
-  logger.info('--- end of document ---');
+  context.report.write(`selections: ${String(editor.selections.length)}`);
+  context.report.write('--- end of document ---');
+  context.report.show();
 }

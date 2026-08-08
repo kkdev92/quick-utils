@@ -9,6 +9,9 @@
 /** Configuration section and `publisher.name` suffix. */
 export const EXTENSION_ID = 'quickUtils';
 
+/** Marketplace publisher, needed to look this extension up in the registry. */
+export const PUBLISHER = 'kkdev92';
+
 /** Output channel name. */
 export const EXTENSION_NAME = 'Quick Utils';
 
@@ -67,6 +70,10 @@ export const COMMANDS = {
   REPORT_STATE: 'quickUtils.reportState',
   COLLECT_DIAGNOSTICS: 'quickUtils.collectDiagnostics',
   INSPECT_DOCUMENT: 'quickUtils.inspectDocument',
+
+  INSERT_PRESET: 'quickUtils.insertPreset',
+  RELOAD_PRESETS: 'quickUtils.reloadPresets',
+  WATCH_FILES: 'quickUtils.watchFiles',
 } as const;
 
 /** Union of every command this extension registers. */
