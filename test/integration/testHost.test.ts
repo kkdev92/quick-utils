@@ -19,7 +19,8 @@
  *   and no manual pass would notice.
  */
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import * as vscode from 'vscode';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createTestHost, type TestHost } from '@kkdev92/vscode-ext-kit/testing';
 
@@ -81,6 +82,50 @@ describe('the application, run on fakes', () => {
     expect(host.fileWatchers._watchedPatterns()).toContain('**/.quick-utils.json');
 
     await host.stop();
+  });
+
+  it('reads the preset file only once trust arrives', async () => {
+    // The extension declares `untrustedWorkspaces.supported`, so it keeps
+    // running in an untrusted window — and because its own enablement never
+    // changes, VS Code does not restart the extension host on its account. It
+    // is re-activated only if some other installed extension happens to flip.
+    // Without listening for the grant, whatever was declined stays unread.
+    const workspace = vscode.workspace as unknown as {
+      isTrusted: boolean;
+      workspaceFolders: unknown;
+      fs: { readFile: ReturnType<typeof vi.fn> };
+      onDidGrantWorkspaceTrust: ReturnType<typeof vi.fn>;
+    };
+    const previous = {
+      trusted: workspace.isTrusted,
+      folders: workspace.workspaceFolders,
+    };
+    workspace.isTrusted = false;
+    workspace.workspaceFolders = [{ uri: vscode.Uri.file('/repo'), name: 'repo', index: 0 }];
+    workspace.fs.readFile.mockResolvedValue(
+      new TextEncoder().encode(JSON.stringify({ snippets: [{ name: 'header', body: '// (c)' }] }))
+    );
+    workspace.fs.readFile.mockClear();
+    workspace.onDidGrantWorkspaceTrust.mockClear();
+
+    try {
+      await host.start();
+      expect(workspace.fs.readFile).not.toHaveBeenCalled();
+
+      const [listener] = workspace.onDidGrantWorkspaceTrust.mock.calls[0] ?? [];
+      expect(listener).toBeTypeOf('function');
+
+      workspace.isTrusted = true;
+      (listener as () => void)();
+      await vi.waitFor(() => {
+        expect(workspace.fs.readFile).toHaveBeenCalled();
+      });
+
+      await host.stop();
+    } finally {
+      workspace.isTrusted = previous.trusted;
+      workspace.workspaceFolders = previous.folders;
+    }
   });
 
   it('runs a command through the real handler', async () => {

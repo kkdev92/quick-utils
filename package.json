@@ -565,7 +565,7 @@
     "clean": "rimraf dist coverage .vsix-verify-temp quick-utils.vsix"
   },
   "dependencies": {
-    "@kkdev92/vscode-ext-kit": "^3.0.0-alpha.1"
+    "@kkdev92/vscode-ext-kit": "^3.0.0-alpha.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",

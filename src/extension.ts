@@ -296,12 +296,22 @@ const quickUtils = defineModule('quickUtils', { uses }, (module): undefined => {
   module.hostedServices.add({
     id: 'quickUtils.presetLoad',
     inject: { reload: PresetReload },
-    // An untrusted window reads no preset file at all (see `presetLoader.ts`),
-    // and granting trust afterwards does not reload the window. Reacting to
-    // `onDidGrantWorkspaceTrust` would be the tidy answer; the reload command
-    // covers it in the meantime, which is the case it was written for.
-    start: async (_context, { reload }) => {
+    start: async (context, { reload }) => {
       await reload();
+
+      // An untrusted window reads no preset file at all (see `presetLoader.ts`),
+      // and being re-activated when trust arrives is not something this
+      // extension can count on: VS Code restarts the extension host only when
+      // some extension's *enablement* changes, and this one declared
+      // `untrustedWorkspaces.supported`, so it was already enabled and its
+      // enablement does not change. It restarts only if some other installed
+      // extension happens to flip. This event is the guaranteed signal.
+      const granted = vscode.workspace.onDidGrantWorkspaceTrust(() => {
+        void reload();
+      });
+      context.signal.addEventListener('abort', () => {
+        granted.dispose();
+      });
     },
   });
 
