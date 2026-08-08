@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-08
+
+Three new features, and a rebuild on `@kkdev92/vscode-ext-kit` 3.x underneath
+them. Every existing command works the way it did — the rewrite is in how the
+extension starts, not in what it does.
+
+### Added
+
+- **Workspace snippets.** A `.quick-utils.json` at the workspace root holds
+  named snippets — the licence header, the `docker run` line, the bug report
+  template — and **Insert Snippet** puts one at the cursor. The file travels
+  with a clone, so it belongs to the project rather than to whoever typed it,
+  and editing it takes effect without a reload. **Reload Snippets** is there for
+  when you want to be told what it made of the file, including which entries it
+  could not read. A malformed file keeps the last version that parsed, so a
+  stray comma costs you nothing.
+- **Decode on hover.** Base64, hex and unix timestamps are shown by pointing at
+  them. The same three readings the commands give, without replacing anything —
+  most of the time you only want to see the value. Only tokens shaped like one
+  of the three get a hover; a long identifier does not.
+- **Watch files.** Point it at a glob and it reports what changes underneath —
+  created, changed, deleted — batched so that a build writing forty files is one
+  report rather than forty.
+
+### Changed
+
+- **Four settings are now declared as integers** rather than numbers:
+  `historySize`, `historyPageSize`, `passwordLength` and `regexTimeoutMs`. They
+  only ever accepted whole values; settings-editor validation now says so before
+  you save rather than after.
+- **The untrusted-workspace description is more specific.** It always said the
+  extension reads no workspace file unless you pick one, and now it names the
+  snippet file as the thing an untrusted window is not read for at all.
+
+### Fixed
+
+- **A decoded hover cannot break out of its code block.** A value that decoded
+  to a closing fence let the rest of it render as markdown — links included.
+  The block is now fenced so that its contents cannot close it.
+- **The snippet file is not read in untrusted workspaces.** It was read at
+  startup like any other, which is not what this extension promises about a
+  window you have declined to trust.
+
 ## [0.2.0] - 2026-08-01
 
 A rewrite. Every command was reimplemented on `@kkdev92/vscode-ext-kit` 2.1,
@@ -156,6 +199,7 @@ First release.
 - Tools and History views in the activity bar.
 - Localised UI (English, Japanese).
 
-[Unreleased]: https://github.com/kkdev92/quick-utils/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/kkdev92/quick-utils/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/kkdev92/quick-utils/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/kkdev92/quick-utils/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/kkdev92/quick-utils/releases/tag/v0.1.0
