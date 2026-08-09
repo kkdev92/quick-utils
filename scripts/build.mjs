@@ -37,7 +37,7 @@ const shared = {
   bundle: true,
   platform: 'node',
   // VS Code 1.101 is the first release whose extension host runs Node 22.
-  target: 'node22',
+  target: 'node24',
   format: 'cjs',
   sourcemap: !production,
   minify: production,
