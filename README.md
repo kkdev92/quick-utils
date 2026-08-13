@@ -4,6 +4,7 @@
 [![CI](https://github.com/kkdev92/quick-utils/actions/workflows/ci.yml/badge.svg)](https://github.com/kkdev92/quick-utils/actions/workflows/ci.yml)
 [![VS Code Marketplace](https://vsmarketplacebadges.dev/version-short/kkdev92.quick-utils.svg)](https://marketplace.visualstudio.com/items?itemName=kkdev92.quick-utils)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-blue.svg)](https://www.typescriptlang.org/)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/14050/badge)](https://www.bestpractices.dev/projects/14050)
 
 Change case, encode, hash, reformat JSON, generate values and test regular
 expressions — on the selection you already have, without leaving the editor and
