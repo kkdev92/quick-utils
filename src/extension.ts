@@ -35,7 +35,8 @@ import * as vscode from 'vscode';
 import { KIT_VERSION } from './core/build';
 import * as Cmd from './core/commands';
 import { EditorSettings, Settings, resolveJsonIndent } from './core/config';
-import { EXTENSION_ID, EXTENSION_NAME, PUBLISHER, REGEX_TESTER_VIEW_TYPE, VIEWS } from './core/constants';
+import { CONFIG, EXTENSION_ID, EXTENSION_NAME, PUBLISHER, REGEX_TESTER_VIEW_TYPE, VIEWS } from './core/constants';
+import { AppLog, filtered } from './core/logging';
 import { uses, type TesterServices } from './core/services';
 import {
   DefaultSecret,
@@ -150,6 +151,14 @@ const quickUtils = defineModule('quickUtils', { uses }, (module): undefined => {
 
   // ---- Services ----------------------------------------------------------
 
+  // Registered first because everything below asks for it. The ambient set in
+  // `core/services` names this token rather than the framework's `Log`, so a
+  // feature gets the filtered logger without knowing there is a filter.
+  module.services.singleton(AppLog, {
+    inject: { logger: Log, config: Settings.token },
+    create: ({ logger, config }) => filtered(logger, () => config.read().get(CONFIG.LOG_LEVEL)),
+  });
+
   module.services.singleton(Registry, {
     inject: { config: Settings.token, editorConfig: EditorSettings.token, l10n: Localization },
     create: ({ config, editorConfig, l10n }) =>
@@ -160,7 +169,7 @@ const quickUtils = defineModule('quickUtils', { uses }, (module): undefined => {
   });
 
   module.services.singleton(History, {
-    inject: { storage: HistoryStorage.token, config: Settings.token, log: Log },
+    inject: { storage: HistoryStorage.token, config: Settings.token, log: AppLog },
     create: ({ storage, config, log }) =>
       new HistoryStore(storage, config, log.withFields({ feature: 'history' })),
   });
@@ -171,7 +180,7 @@ const quickUtils = defineModule('quickUtils', { uses }, (module): undefined => {
   });
 
   module.services.singleton(Regex, {
-    inject: { log: Log },
+    inject: { log: AppLog },
     create: ({ log }) => new RegexClient(defaultWorkerPath(), log.withFields({ feature: 'regex' })),
   });
 
@@ -189,7 +198,7 @@ const quickUtils = defineModule('quickUtils', { uses }, (module): undefined => {
   // the store and logger once here is what stops the three of them from
   // drifting into three slightly different loads.
   module.services.singleton(PresetReload, {
-    inject: { store: Presets, log: Log },
+    inject: { store: Presets, log: AppLog },
     create:
       ({ store, log }) =>
       (): Promise<void> =>
@@ -199,7 +208,7 @@ const quickUtils = defineModule('quickUtils', { uses }, (module): undefined => {
   // A service rather than a tree-view local: the checkbox handler and the
   // reset command both drive the same provider.
   module.services.singleton(Tools, {
-    inject: { registry: Registry, favorites: Favorites, l10n: Localization, log: Log },
+    inject: { registry: Registry, favorites: Favorites, l10n: Localization, log: AppLog },
     create: ({ registry, favorites, l10n, log }) =>
       new ToolsTreeProvider(registry, favorites, l10n, log.withFields({ feature: 'tools' })),
   });
@@ -345,7 +354,7 @@ const quickUtils = defineModule('quickUtils', { uses }, (module): undefined => {
 
   module.hostedServices.add({
     id: 'quickUtils.favoritesCheckbox',
-    inject: { tools: Tools, log: Log },
+    inject: { tools: Tools, log: AppLog },
     start: (context, { tools, log }) => {
       const subscription = tools.onDidChangeCheckboxState((changes) => {
         void (async (): Promise<void> => {

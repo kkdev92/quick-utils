@@ -158,4 +158,27 @@ describe('the application, run on fakes', () => {
 
     expect(host.logs.at('error')).toEqual([]);
   });
+
+  // `quickUtils.logLevel` was declared, documented and localised for a while
+  // with nothing reading it, so this pair is about the wiring rather than the
+  // comparison — `HistoryStore` takes its logger from the injected token, and
+  // that is the seam where a filter is easy to forget.
+  it('logs at info by default', async () => {
+    await host.start();
+    host.notifications._respondWith(0); // confirm the clear, which is what logs
+    await host.commands.execute(COMMANDS.HISTORY_CLEAR);
+
+    expect(host.logs.at('info').map((entry) => entry.message)).toContain('History cleared');
+    await host.stop();
+  });
+
+  it('drops an info entry once logLevel is raised to warn', async () => {
+    host.settings._set('quickUtils', 'logLevel', 'globalValue', 'warn');
+    await host.start();
+    host.notifications._respondWith(0);
+    await host.commands.execute(COMMANDS.HISTORY_CLEAR);
+
+    expect(host.logs.at('info').map((entry) => entry.message)).not.toContain('History cleared');
+    await host.stop();
+  });
 });
