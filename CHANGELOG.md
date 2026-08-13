@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`quickUtils.logLevel` now does something.** It was declared, described in
+  both language files, documented and offered in the settings editor — and no
+  code read it, so setting it changed nothing. It is a *floor*: VS Code owns a
+  `LogOutputChannel`'s level, per channel, in the Output panel, so this can make
+  the log quieter but cannot turn on output VS Code is already dropping. Use
+  **Developer: Set Log Level** for that. The level is read per entry, so a
+  change applies immediately rather than after a reload.
+
 ## [0.3.0] - 2026-08-08
 
 Three new features, and a rebuild on `@kkdev92/vscode-ext-kit` 3.x underneath
