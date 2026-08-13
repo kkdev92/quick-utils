@@ -14,7 +14,6 @@
 import {
   Editors,
   Localization,
-  Log,
   Notifications,
   QuickInput,
   type CommandsService,
@@ -26,6 +25,7 @@ import {
 } from '@kkdev92/vscode-ext-kit';
 
 import { EditorSettings, Settings } from './config';
+import { AppLog } from './logging';
 import type { RegexClient } from '../regex/client';
 
 /**
@@ -36,8 +36,12 @@ import type { RegexClient } from '../regex/client';
  * exactly the drift nobody notices until a member is silently `unknown`.
  */
 export const uses = {
-  /** Scoped per feature, so an entry says where it came from. */
-  logger: Log,
+  /**
+   * Scoped per feature, so an entry says where it came from — and filtered by
+   * `quickUtils.logLevel`, which is why it is {@link AppLog} rather than the
+   * framework's `Log`.
+   */
+  logger: AppLog,
   /** This extension's settings. */
   config: Settings.token,
   /** `editor.*`, for the settings VS Code owns. */
