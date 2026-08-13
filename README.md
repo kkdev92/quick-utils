@@ -292,10 +292,10 @@ CI runs the test suite on Windows, macOS and Linux (x64 on Windows and Linux,
 ARM64 on macOS). The extension is plain JavaScript, so other combinations are
 expected to work; please open an issue if one does not.
 
-> The 1.125 floor comes from `@kkdev92/vscode-ext-kit` 2.0, which raised its own
-> `engines.vscode` to `^1.125.0`. Quick Utils 0.1.x works on VS Code 1.96 and up;
-> installations older than 1.125 keep that version and simply stop receiving
-> updates.
+> The 1.125 floor comes from `@kkdev92/vscode-ext-kit`, whose `engines.vscode` is
+> `^1.125.0` — the newest `@types/vscode` there is, and so the newest API it can
+> name. Quick Utils 0.1.x works on VS Code 1.96 and up; installations older than
+> 1.125 keep that version and simply stop receiving updates.
 
 ---
 
@@ -363,8 +363,8 @@ are collected in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Acknowledgments
 
-- Extension utilities by [@kkdev92/vscode-ext-kit](https://github.com/kkdev92/vscode-ext-kit).
-  Quick Utils doubles as that library's integration test bed: nearly every part of
-  its API is exercised somewhere in here
+- Extension framework by [@kkdev92/vscode-ext-kit](https://github.com/kkdev92/vscode-ext-kit).
+  Quick Utils doubles as its integration test bed — the widest surface of any
+  consumer, and where most of its bugs were found
 - Word, grapheme and collation behaviour comes from ICU via `Intl.Segmenter`,
   `Intl.Collator` and friends, which ship with Node
