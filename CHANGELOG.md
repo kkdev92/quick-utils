@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `@kkdev92/vscode-ext-kit` `^3.0.0` → `^4.0.0`. The framework raised its own
+  `engines.vscode` to `^1.134.0`, which this extension already declares, so the
+  two now agree instead of the extension quietly requiring more than the library
+  it is built on.
+
+  **One byte of the bundle changes, and it is meant to.** Built both ways and
+  compared: the esbuild output differs in exactly one byte out of 348,529 —
+  `KIT_VERSION` in `src/core/build.ts`, which the build inlines so the state
+  report can name the kit a bundle was actually compiled against rather than
+  the semver range. It now correctly reports `4.0.0`. Nothing else moves: the
+  published 3.0.0 and 4.0.0 packages differ only in
+  `testing/fakes/fake-filewatcher`, which reaches callers through the
+  `./testing` subpath and never enters a bundle, and all 105 `.d.ts` are
+  identical.
+
 ## [0.4.0] - 2026-08-29
 
 ### Changed
