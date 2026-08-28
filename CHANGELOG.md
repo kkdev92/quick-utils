@@ -21,7 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already past 1.131; it has now caught up to 1.134.0, one release behind the
   current 1.135.
 
-- Dev dependencies: `vitest` and `@vitest/coverage-v8` 4.1.10 → 4.1.11.
+- **Building this extension now needs Node.js 24** (`engines.node` `>=22.12.0`
+  → `>=24.0.0`, `@types/node` 22 → 24). This is a contributor requirement, not a
+  user one — VS Code supplies the Node that runs the extension.
+
+- `@kkdev92/vscode-ext-kit` moved from `^3.0.0-alpha.1` to the released `^3.0.0`.
+  0.3.0 shipped against an alpha; this is the same framework, out of prerelease.
+
+- Dev dependencies: `vitest` and `@vitest/coverage-v8` 4.1.10 → 4.1.11, `eslint`
+  10.8.0 → 10.9.1, `typescript-eslint` 8.65.0 → 8.68.0. `lint` also fails on
+  warnings now, so a warning cannot accumulate unnoticed.
 
 - `CONTRIBUTING.md` said Node.js ≥ 22.12 while `engines.node` and CI both
   require 24, and cited the floor of `@kkdev92/vscode-ext-kit` 2.0 when the
