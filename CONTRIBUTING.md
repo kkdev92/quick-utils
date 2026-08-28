@@ -10,8 +10,8 @@ This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md). By particip
 
 ### Prerequisites
 
-- Node.js ≥ 22.12 (matches `engines.node`, which follows the kit's floor, and CI)
-- VS Code ≥ 1.125 (the floor `@kkdev92/vscode-ext-kit` 2.0 requires)
+- Node.js ≥ 24 (matches `engines.node` and what CI runs)
+- VS Code ≥ 1.134 (the floor `@kkdev92/vscode-ext-kit` 3.x requires)
 - Nothing else — no Java, no Docker, no service credentials
 
 ### Development Setup
