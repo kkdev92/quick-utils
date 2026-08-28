@@ -54,7 +54,7 @@ const shared = {
 const webviewShared = {
   bundle: true,
   platform: 'browser',
-  // Webviews in a 1.125+ host run a current Chromium.
+  // Webviews in a 1.134+ host run a current Chromium.
   target: 'es2022',
   format: 'iife',
   sourcemap: !production,
