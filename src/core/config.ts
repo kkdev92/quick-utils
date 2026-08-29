@@ -62,12 +62,17 @@ export type Config = SettingsAccessor<ConfigValues>;
  * declaration: a settings group is scoped to one section, and re-declaring a
  * VS Code-owned setting under `quickUtils.*` would mean maintaining a second
  * source of truth for something the editor already tracks.
+ *
+ * `contributed: false` says the same thing to the tooling: this extension reads
+ * the section and does not contribute it, so the manifest check does not ask
+ * `package.json` for an `editor.tabSize` entry.
  */
 export const EditorSettings = defineSettings({
   section: 'editor',
   values: {
     tabSize: setting.integer({ default: 4, minimum: 1, maximum: 16 }),
   },
+  contributed: false,
 });
 
 /** What a feature is handed to read `editor.*`. */
