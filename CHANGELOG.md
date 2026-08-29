@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `@kkdev92/vscode-ext-kit` `^4.0.0` → `^4.1.0`, and `EditorSettings` declares
+  `contributed: false`. The `editor.tabSize` group has always been a section
+  this extension reads and does not own; 4.1.0 lets the declaration say so, and
+  the framework's manifest check — now also a command, `vscode-ext-kit manifest`
+  — stops asking `package.json` for an `editor.tabSize` entry. Run against this
+  extension's bundle, it reports `manifest ok: 47 command(s), 10 setting(s),
+  3 view(s) agree`; before the flag it reported that one setting as missing.
+
+  **The bundle grows by 6,415 bytes (348,529 → 354,944), and the growth is
+  accounted for.** Built against both kit versions and compared: `KIT_VERSION`
+  now reads `4.1.0`, and the rest is framework runtime that 4.1.0 added and
+  this extension links — a preflight failure reported as data rather than
+  sentences, a shutdown timeout that names the hosted service, operations and
+  scopes still holding it, `inspect()` on both scope kinds, and
+  `defineExtension` refusing a second activation after `deactivate`. Nothing
+  reached through a test or the command line enters the bundle: `describePlan`
+  and `diffManifest` are absent from it, as they should be. The 4.0.1 fix rides
+  along as well — the tree-view adapter no longer disposes a module-declared
+  provider twice on deactivation, which this extension's view was subject to.
+
 - `@kkdev92/vscode-ext-kit` `^3.0.0` → `^4.0.0`. The framework raised its own
   `engines.vscode` to `^1.134.0`, which this extension already declares, so the
   two now agree instead of the extension quietly requiring more than the library
