@@ -28,8 +28,6 @@ and stop receiving updates.
 - `@kkdev92/vscode-ext-kit` `^4.1.0` → `^5.0.0`. The only change in that major is
   the VS Code floor; the API it exposes is byte-for-byte what 4.1.1 exposed.
 
-### Changed
-
 - `@kkdev92/vscode-ext-kit` `^4.0.0` → `^4.1.0`, and `EditorSettings` declares
   `contributed: false`. The `editor.tabSize` group has always been a section
   this extension reads and does not own; 4.1.0 lets the declaration say so, and
