@@ -2,7 +2,7 @@
   "name": "quick-utils",
   "displayName": "Quick Utils",
   "description": "%extension.description%",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "kkdev92",
   "author": {
     "name": "kkdev92",
@@ -18,7 +18,7 @@
     "url": "https://github.com/kkdev92/quick-utils/issues"
   },
   "engines": {
-    "vscode": "^1.134.0",
+    "vscode": "^1.136.0",
     "node": ">=24.0.0"
   },
   "categories": [
@@ -564,13 +564,10 @@
     "uninstall-local": "code --uninstall-extension kkdev92.quick-utils",
     "clean": "rimraf dist coverage .vsix-verify-temp quick-utils.vsix"
   },
-  "dependencies": {
-    "@kkdev92/vscode-ext-kit": "^4.1.0"
-  },
   "devDependencies": {
     "@eslint/js": "^10.0.0",
     "@types/node": "^24.13.3",
-    "@types/vscode": "~1.134.0",
+    "@types/vscode": "~1.136.0",
     "@vitest/coverage-v8": "^4.1.11",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.9.2",
@@ -578,7 +575,10 @@
     "eslint": "^10.9.1",
     "rimraf": "^6.1.3",
     "typescript": "~6.0.3",
-    "typescript-eslint": "^8.68.0",
+    "typescript-eslint": "^8.69.0",
     "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "@kkdev92/vscode-ext-kit": "^5.0.0"
   }
 }
