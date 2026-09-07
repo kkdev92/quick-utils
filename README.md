@@ -285,17 +285,17 @@ threat model and for vulnerability reporting, see [SECURITY.md](SECURITY.md).
 
 ## Platform Requirements
 
-- VS Code 1.134 or later
+- VS Code 1.136 or later
 - Windows, macOS or Linux, on x64 or ARM64
 
 CI runs the test suite on Windows, macOS and Linux (x64 on Windows and Linux,
 ARM64 on macOS). The extension is plain JavaScript, so other combinations are
 expected to work; please open an issue if one does not.
 
-> The 1.134 floor comes from `@kkdev92/vscode-ext-kit`, whose `engines.vscode` is
-> `^1.134.0` — the newest `@types/vscode` there is, and so the newest API it can
-> name. Quick Utils 0.1.x works on VS Code 1.96 and up; installations older than
-> 1.134 keep the version they have and simply stop receiving updates.
+> The floor comes from `@kkdev92/vscode-ext-kit`, whose `engines.vscode` tracks
+> `@types/vscode` — the newest API it can name. Quick Utils 0.1.x works on VS
+> Code 1.96 and up, and 0.4.x on 1.134 and up; installations older than the
+> current floor keep the version they have and simply stop receiving updates.
 
 ---
 
