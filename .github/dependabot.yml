@@ -33,17 +33,17 @@ updates:
         update-types:
           - version-update:semver-major
 
-      # vitest 5.x: measured against a real consumer, not assumed. Installing
-      # vitest 5 and @vitest/coverage-v8 5 together resolves cleanly, but the
-      # integration project — which activates the built bundle against the
-      # `vscode` mock from `@kkdev92/vscode-ext-kit/testing/vitest` — then sees
-      # an empty mock: six tests fail with recorded calls of []. The unit
-      # project, which imports src directly, still passes, so the alias works and
-      # the kit's own `vscode` import is what stops resolving to the same module.
-      # Declaring the inline explicitly in this repo's own config did not change
-      # it. Drop this once the kit's testing surface is verified on vitest 5 —
-      # the kit's `peerDependencies` say `vitest >=4`, and that claim is what has
-      # to become true first.
+      # vitest 5.x: held here for this repository's own integration test, not
+      # for the framework — the kit's own suite passes on vitest 5, and so do
+      # both sibling extensions. test/integration/extension.test.ts loads the
+      # built CJS bundle and patches `Module._load` to hand it the mock imported
+      # from `@kkdev92/vscode-ext-kit/testing/vitest`; this repository also
+      # merges the kit's Vitest config, which aliases `vscode`, into that same
+      # project. On vitest 4 the bundle and the test see one mock. On vitest 5
+      # they do not — six assertions read a mock that recorded nothing — while
+      # the sibling that patches `Module._load` without merging the alias passes.
+      # Drop this once the integration project hands the bundle its mock in a
+      # way vitest 5 honours.
       - dependency-name: vitest
         update-types:
           - version-update:semver-major
