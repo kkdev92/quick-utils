@@ -285,7 +285,7 @@ threat model and for vulnerability reporting, see [SECURITY.md](SECURITY.md).
 
 ## Platform Requirements
 
-- VS Code 1.136 or later
+- VS Code 1.137 or later
 - Windows, macOS or Linux, on x64 or ARM64
 
 CI runs the test suite on Windows, macOS and Linux (x64 on Windows and Linux,
