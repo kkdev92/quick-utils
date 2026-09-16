@@ -579,6 +579,6 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
-    "@kkdev92/vscode-ext-kit": "^6.0.0"
+    "@kkdev92/vscode-ext-kit": "^6.1.0"
   }
 }

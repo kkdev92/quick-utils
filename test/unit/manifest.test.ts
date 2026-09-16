@@ -26,7 +26,6 @@ interface Manifest {
     configuration: { properties: Record<string, unknown> };
     views: Record<string, { id: string; type?: string }[]>;
     menus: Record<string, { command?: string; submenu?: string; when?: string }[]>;
-    keybindings: { command: string }[];
   };
 }
 
@@ -52,6 +51,10 @@ describe('what src declares', () => {
       settings: [Settings],
       commands: Object.values(Contracts),
       views: Object.values(VIEWS),
+      // No `allow`: every key this extension binds is its own command. A
+      // keybinding naming one that does not exist is accepted by VS Code and
+      // then does nothing when pressed, which is what this catches.
+      keybindings: {},
     });
   });
 });
@@ -107,12 +110,14 @@ describe('activation', () => {
   });
 });
 
-describe('menus and keybindings', () => {
+describe('menus', () => {
   it('references only declared commands', () => {
-    const referenced = [
-      ...Object.values(manifest.contributes.menus).flat().map((entry) => entry.command),
-      ...manifest.contributes.keybindings.map((entry) => entry.command),
-    ].filter((command): command is string => command !== undefined);
+    // Keybindings were checked here too until `assertManifestMatches` grew a
+    // `keybindings` option. Menus it does not read, so this half stays.
+    const referenced = Object.values(manifest.contributes.menus)
+      .flat()
+      .map((entry) => entry.command)
+      .filter((command): command is string => command !== undefined);
 
     for (const command of referenced) {
       expect(declaredCommands).toContain(command);
