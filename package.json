@@ -2,7 +2,7 @@
   "name": "quick-utils",
   "displayName": "Quick Utils",
   "description": "%extension.description%",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "publisher": "kkdev92",
   "author": {
     "name": "kkdev92",
@@ -18,7 +18,7 @@
     "url": "https://github.com/kkdev92/quick-utils/issues"
   },
   "engines": {
-    "vscode": "^1.137.0",
+    "vscode": "^1.138.0",
     "node": ">=24.0.0"
   },
   "categories": [
@@ -567,7 +567,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.0",
     "@types/node": "^24.13.4",
-    "@types/vscode": "~1.137.0",
+    "@types/vscode": "~1.138.0",
     "@vitest/coverage-v8": "^4.1.11",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.9.2",
@@ -579,6 +579,6 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
-    "@kkdev92/vscode-ext-kit": "^6.1.0"
+    "@kkdev92/vscode-ext-kit": "^7.0.0"
   }
 }

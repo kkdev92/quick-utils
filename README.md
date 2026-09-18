@@ -285,7 +285,7 @@ threat model and for vulnerability reporting, see [SECURITY.md](SECURITY.md).
 
 ## Platform Requirements
 
-- VS Code 1.137 or later
+- VS Code 1.138 or later
 - Windows, macOS or Linux, on x64 or ARM64
 
 CI runs the test suite on Windows, macOS and Linux (x64 on Windows and Linux,
@@ -295,9 +295,9 @@ expected to work; please open an issue if one does not.
 > The floor comes from `@kkdev92/vscode-ext-kit`, whose `engines.vscode` tracks
 > `@types/vscode` — the newest API it can name.
 >
-> **Upgrading?** The minimum is now 1.137 — it was 1.136 from 0.5.0, 1.134 from
-> 0.4.0, 1.125 from 0.2.0, and 1.96 before that. Older installations keep the
-> version they have and stop receiving updates.
+> **Upgrading?** The minimum is now 1.138 — it was 1.137 from 0.6.0, 1.136 from
+> 0.5.0, 1.134 from 0.4.0, 1.125 from 0.2.0, and 1.96 before that. Older
+> installations keep the version they have and stop receiving updates.
 
 ---
 
