@@ -332,7 +332,7 @@ used, and the feature set was reworked around a single grouped transform picker.
   `quickUtils.formatJson` is now `quickUtils.jsonFormat`. Custom keybindings
   referencing the old ids need updating.
 
-## [0.1.0] - 2026-04-26
+## [0.1.0] - 2026-02-07
 
 First release.
 
@@ -346,6 +346,7 @@ First release.
 
 [Unreleased]: https://github.com/kkdev92/quick-utils/compare/v0.7.0...HEAD
 [0.7.0]: https://github.com/kkdev92/quick-utils/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/kkdev92/quick-utils/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/kkdev92/quick-utils/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/kkdev92/quick-utils/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/kkdev92/quick-utils/compare/v0.2.0...v0.3.0

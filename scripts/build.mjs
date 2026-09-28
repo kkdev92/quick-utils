@@ -36,7 +36,8 @@ const kitVersion = require('@kkdev92/vscode-ext-kit/package.json').version;
 const shared = {
   bundle: true,
   platform: 'node',
-  // VS Code 1.101 is the first release whose extension host runs Node 22.
+  // The extension host of the oldest VS Code this accepts (`engines.vscode`)
+  // runs Node 24.
   target: 'node24',
   format: 'cjs',
   sourcemap: !production,

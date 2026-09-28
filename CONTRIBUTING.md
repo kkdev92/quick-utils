@@ -44,7 +44,8 @@ src/
 │                    tsconfig — DOM globals, no node/vscode — lives here too.
 └── extension.ts     wiring only: vscode + the kit + the above
 scripts/
-├── build.mjs        esbuild — two entry points, kit version baked in
+├── build.mjs        esbuild — four entry points (extension, regex worker, two
+│                    webview scripts), kit version baked in
 ├── verify-vsix.mjs  VSIX contents + packaged-worker smoke test
 └── l10n.mjs         extract/check the message bundles
 media/webview/   the static assets: the tester's HTML template and both
@@ -53,7 +54,8 @@ media/webview/   the static assets: the tester's HTML template and both
 test/
 ├── unit/            vitest against src/ — no build, no extension host
 ├── integration/     vitest against dist/ — real worker thread, real bundle
-└── vscode.ts        the `vscode` module for tests, from the kit's mock kit
+└── eh/              a real VS Code Extension Host (`npm run test:eh`); run by
+                     hand, not in CI
 ```
 
 Three constraints worth knowing before you change things:
@@ -112,8 +114,10 @@ goes out to the other extensions that use it. If you are changing the kit:
 
 - Nearly every runtime export of the kit is exercised somewhere here, which is
   what makes this a useful place to try a kit change before it goes out
-- `test/vscode.ts` is built on the kit's own `createVSCodeMock`, so a gap in the
-  mock shows up here as a test failure rather than as a surprise in production
+- The tests take `vscode` from the kit's own mock: `vitest.config.mts` merges the
+  kit's Vitest config, which aliases `vscode` to
+  `@kkdev92/vscode-ext-kit/testing/vitest`. A gap in the mock shows up here as a
+  test failure rather than as a surprise in production
 - `test/integration/extension.test.ts` activates the real bundle against that
   mock, which is the closest thing to a smoke test for the kit's wiring
 

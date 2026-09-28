@@ -98,9 +98,10 @@ the editor.
 - The webview has `enableScripts: true` and a generated Content Security Policy
   with a per-load nonce; it has no file system access, and `retainContextWhenHidden`
   is off.
-- Subject text is only read from a file the user explicitly picks through the
-  system open dialog. That file is then watched so the subject stays current;
-  nothing else on disk is touched.
+- Subject text comes only from what the user chooses: text typed into the
+  tester, a file picked through the system open dialog, or the files matching a
+  glob the user enters (at most 50, `node_modules` excluded). What was chosen is
+  then watched so the subject stays current; nothing else on disk is touched.
 - Matches are rendered into the DOM as text nodes and `<mark>` elements, not by
   assembling an HTML string, so subject text cannot become markup.
 
@@ -113,16 +114,23 @@ should be used to authenticate anything. Choosing one shows a warning with a
 the default.
 
 HMAC is a different construction and remains sound over SHA-1, but SHA-256 is
-still the sensible choice. Keys are interpreted as UTF-8; a key that is really
-hex or Base64 must be decoded before use, or the computed value will not match
-what the other side produced.
+still the sensible choice. Keys are read as UTF-8 text by default;
+`quickUtils.hmacKeyEncoding` reads them as `hex` or `base64` instead, for a key
+that is really bytes. A key read the wrong way is the usual reason a computed
+value does not match what the other side produced.
 
 ### Untrusted and virtual workspaces
 
-The extension declares support for both. It reads no workspace file unless the
-user picks one, spawns no process other than its own regex worker, and executes
-nothing from the workspace. The only inputs it processes are the active
-selection, the clipboard when you ask for it, and text you type into the tester.
+The extension declares support for both. It spawns no process other than its
+own regex worker and executes nothing from the workspace. The inputs it
+processes are the active selection, the clipboard when you ask for it, what you
+give the Regex Tester (typed text, a picked file, or files matching a glob you
+enter), and the token under the pointer when you hover over it, which is decoded
+in memory and shown in the hover, never written anywhere.
+
+The one file it reads without being asked is the workspace's shared snippet
+file, `.quick-utils.json`: it is loaded when the extension starts and reloaded
+when it changes. In an untrusted workspace it is not read at all.
 
 ### Supply chain notes
 
