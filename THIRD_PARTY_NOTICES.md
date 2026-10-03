@@ -8,7 +8,7 @@ licence text is in [`third-party/`](third-party).
 
 | Component | Version | Licence | Full text |
 | --- | --- | --- | --- |
-| [`@kkdev92/vscode-ext-kit`](https://github.com/kkdev92/vscode-ext-kit) | 7.0.0 | MIT | [vscode-ext-kit-LICENSE.txt](third-party/vscode-ext-kit-LICENSE.txt) |
+| [`@kkdev92/vscode-ext-kit`](https://github.com/kkdev92/vscode-ext-kit) | 7.1.0 | MIT | [vscode-ext-kit-LICENSE.txt](third-party/vscode-ext-kit-LICENSE.txt) |
 
 Development-only dependencies (TypeScript, esbuild, ESLint, Vitest, vsce and
 their transitive dependencies) contribute no code to the VSIX and are not listed
