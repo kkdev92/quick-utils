@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `@kkdev92/vscode-ext-kit` `^7.0.0` → `^7.1.0`. The `quickUtils.logLevel` floor
+  is now applied with the kit's `filterLogger`, and the Regex Tester and the
+  presets file find their workspace folder through the kit's `Workspace`
+  service. No command, setting or view changed. The VS Code floor stays at
+  1.138, which is also what the kit requires.
+
 ## [0.7.0] - 2026-09-18
 
 **Breaking: VS Code 1.138 or later is now required**, up from 1.137, in step with

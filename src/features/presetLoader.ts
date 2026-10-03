@@ -11,7 +11,7 @@
 import * as vscode from 'vscode';
 
 import { PRESET_FILE, parsePresets, type PresetStore } from './presets';
-import type { Logger } from '@kkdev92/vscode-ext-kit';
+import type { Logger, WorkspaceService } from '@kkdev92/vscode-ext-kit';
 
 /**
  * Loads the preset file from the first workspace folder into the store.
@@ -23,11 +23,15 @@ import type { Logger } from '@kkdev92/vscode-ext-kit';
  *
  * @example
  * ```ts
- * const reload = () => loadPresets(store, logger);
+ * const reload = () => loadPresets(store, workspace, logger);
  * module.fileWatchers.add({ patterns: `**\/${PRESET_FILE}`, handle: () => reload() });
  * ```
  */
-export async function loadPresets(store: PresetStore, logger: Logger): Promise<void> {
+export async function loadPresets(
+  store: PresetStore,
+  workspace: WorkspaceService,
+  logger: Logger
+): Promise<void> {
   // Presets are the one thing here that reads a workspace file without being
   // asked to — a hosted service loads them at activation and a watcher reloads
   // them. In an untrusted window that is content from a repository the user has
@@ -39,13 +43,13 @@ export async function loadPresets(store: PresetStore, logger: Logger): Promise<v
     return;
   }
 
-  const folder = vscode.workspace.workspaceFolders?.[0];
+  const folder = workspace.folders()[0];
   if (folder === undefined) {
     store.clear();
     return;
   }
 
-  const uri = vscode.Uri.joinPath(folder.uri, PRESET_FILE);
+  const uri = vscode.Uri.joinPath(folder.uri as vscode.Uri, PRESET_FILE);
   let text: string;
   try {
     text = new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));

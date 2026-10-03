@@ -341,13 +341,13 @@ async function readGlob(context: TesterServices, glob: string): Promise<Subject 
             return undefined;
           }
           progress.report({
-            message: vscode.workspace.asRelativePath(uri),
+            message: context.workspace.relativePath(uri),
             increment: 100 / found.length,
           });
           try {
             const bytes = await vscode.workspace.fs.readFile(uri);
             parts.push(
-              `# ${vscode.workspace.asRelativePath(uri)}\n${new TextDecoder().decode(bytes)}`
+              `# ${context.workspace.relativePath(uri)}\n${new TextDecoder().decode(bytes)}`
             );
           } catch (error) {
             // A file that vanished between the scan and the read is not worth
