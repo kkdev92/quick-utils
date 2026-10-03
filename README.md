@@ -292,8 +292,8 @@ CI runs the test suite on Windows, macOS and Linux (x64 on Windows and Linux,
 ARM64 on macOS). The extension is plain JavaScript, so other combinations are
 expected to work; please open an issue if one does not.
 
-> The floor comes from `@kkdev92/vscode-ext-kit`, whose `engines.vscode` tracks
-> `@types/vscode` — the newest API it can name.
+> The floor comes from `@kkdev92/vscode-ext-kit`, which raises its
+> `engines.vscode` when it starts using an API older VS Code versions lack.
 >
 > **Upgrading?** The minimum is now 1.138 — it was 1.137 from 0.6.0, 1.136 from
 > 0.5.0, 1.134 from 0.4.0, 1.125 from 0.2.0, and 1.96 before that. Older
