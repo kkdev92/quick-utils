@@ -22,6 +22,7 @@ import {
   type OperationProgress,
   type OperationsService,
   type WebviewService,
+  type WorkspaceService,
 } from '@kkdev92/vscode-ext-kit';
 
 import { EditorSettings, Settings } from './config';
@@ -84,4 +85,5 @@ export interface TesterServices extends Services {
   readonly watchers: FileWatcherService;
   readonly commands: CommandsService;
   readonly client: RegexClient;
+  readonly workspace: WorkspaceService;
 }

@@ -13,15 +13,14 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createFakeWorkspace } from '@kkdev92/vscode-ext-kit/testing';
+
 const readFile = vi.fn();
 
 vi.mock('vscode', () => ({
   workspace: {
     get isTrusted(): boolean {
       return state.trusted;
-    },
-    get workspaceFolders(): readonly { uri: { path: string } }[] | undefined {
-      return state.folders;
     },
     fs: { readFile },
   },
@@ -33,14 +32,14 @@ vi.mock('vscode', () => ({
   },
 }));
 
-const state: {
-  trusted: boolean;
-  folders: readonly { uri: { path: string } }[] | undefined;
-} = { trusted: true, folders: [{ uri: { path: '/repo' } }] };
+const state: { trusted: boolean } = { trusted: true };
 
 const { loadPresets } = await import('../../src/features/presetLoader');
 const { PresetStore } = await import('../../src/features/presets');
-const logger = { debug: vi.fn(), warn: vi.fn() } as unknown as Parameters<typeof loadPresets>[1];
+const logger = { debug: vi.fn(), warn: vi.fn() } as unknown as Parameters<typeof loadPresets>[2];
+// The folder comes from the kit's fake, which stands in for the Workspace
+// service; trust and the file read still go through the mocked `vscode`.
+const workspace = createFakeWorkspace(['/repo']);
 
 const encode = (value: unknown): Uint8Array =>
   new TextEncoder().encode(JSON.stringify(value));
@@ -49,14 +48,13 @@ describe('loadPresets', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     state.trusted = true;
-    state.folders = [{ uri: { path: '/repo' } }];
   });
 
   it('reads the file in a trusted workspace', async () => {
     readFile.mockResolvedValue(encode({ snippets: [{ name: 'header', body: '// (c)' }] }));
     const store = new PresetStore();
 
-    await loadPresets(store, logger);
+    await loadPresets(store, workspace, logger);
 
     expect(readFile).toHaveBeenCalledTimes(1);
     expect(store.presets.map((preset) => preset.name)).toEqual(['header']);
@@ -67,7 +65,7 @@ describe('loadPresets', () => {
     readFile.mockResolvedValue(encode({ snippets: [{ name: 'header', body: '// (c)' }] }));
     const store = new PresetStore();
 
-    await loadPresets(store, logger);
+    await loadPresets(store, workspace, logger);
 
     // Not "read it and discard it" — the read never happens. A file the user
     // has not trusted is not parsed, not held, and not reported on.
@@ -80,11 +78,11 @@ describe('loadPresets', () => {
   it('drops presets already in effect when trust is revoked', async () => {
     readFile.mockResolvedValue(encode({ snippets: [{ name: 'header', body: '// (c)' }] }));
     const store = new PresetStore();
-    await loadPresets(store, logger);
+    await loadPresets(store, workspace, logger);
     expect(store.presets).toHaveLength(1);
 
     state.trusted = false;
-    await loadPresets(store, logger);
+    await loadPresets(store, workspace, logger);
 
     expect(store.presets).toEqual([]);
   });

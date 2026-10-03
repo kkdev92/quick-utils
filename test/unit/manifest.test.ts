@@ -48,6 +48,7 @@ const declaredCommands = new Set(manifest.contributes.commands.map((entry) => en
 describe('what src declares', () => {
   it('is what package.json contributes', () => {
     assertManifestMatches(manifest, {
+      engines: true,
       settings: [Settings],
       commands: Object.values(Contracts),
       views: Object.values(VIEWS),

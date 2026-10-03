@@ -18,8 +18,10 @@ import {
   Secrets,
   StatusBar,
   Webviews,
+  Workspace,
   defineExtension,
   defineModule,
+  filterLogger,
   serviceToken,
   type ActiveEditor,
   type ApplicationPlan,
@@ -36,7 +38,7 @@ import { KIT_VERSION } from './core/build';
 import * as Cmd from './core/commands';
 import { EditorSettings, Settings, resolveJsonIndent } from './core/config';
 import { CONFIG, EXTENSION_ID, EXTENSION_NAME, PUBLISHER, REGEX_TESTER_VIEW_TYPE, VIEWS } from './core/constants';
-import { AppLog, filtered } from './core/logging';
+import { AppLog } from './core/logging';
 import { uses, type TesterServices } from './core/services';
 import {
   DefaultSecret,
@@ -156,7 +158,7 @@ const quickUtils = defineModule('quickUtils', { uses }, (module): undefined => {
   // feature gets the filtered logger without knowing there is a filter.
   module.services.singleton(AppLog, {
     inject: { logger: Log, config: Settings.token },
-    create: ({ logger, config }) => filtered(logger, () => config.read().get(CONFIG.LOG_LEVEL)),
+    create: ({ logger, config }) => filterLogger(logger, () => config.read().get(CONFIG.LOG_LEVEL)),
   });
 
   module.services.singleton(Registry, {
@@ -198,11 +200,11 @@ const quickUtils = defineModule('quickUtils', { uses }, (module): undefined => {
   // the store and logger once here is what stops the three of them from
   // drifting into three slightly different loads.
   module.services.singleton(PresetReload, {
-    inject: { store: Presets, log: AppLog },
+    inject: { store: Presets, log: AppLog, workspace: Workspace },
     create:
-      ({ store, log }) =>
+      ({ store, log, workspace }) =>
       (): Promise<void> =>
-        loadPresets(store, log.withFields({ feature: 'presets' })),
+        loadPresets(store, workspace, log.withFields({ feature: 'presets' })),
   });
 
   // A service rather than a tree-view local: the checkbox handler and the
@@ -263,6 +265,7 @@ const quickUtils = defineModule('quickUtils', { uses }, (module): undefined => {
       operations: Operations,
       watchers: FileWatchers,
       commands: Commands,
+      workspace: Workspace,
     },
     restore: async (
       panel: ManagedWebviewPanel<RegexTesterSchema>,
@@ -398,6 +401,7 @@ const quickUtils = defineModule('quickUtils', { uses }, (module): undefined => {
     operations: Operations,
     watchers: FileWatchers,
     commands: Commands,
+    workspace: Workspace,
   } as const;
   const reporting = { history: History, secrets: Secrets, report: Report, build: Build } as const;
 
