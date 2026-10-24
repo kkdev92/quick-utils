@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-24
+
 ### Changed
 
 - `@kkdev92/vscode-ext-kit` `^7.0.0` → `^7.1.0`. The `quickUtils.logLevel` floor
@@ -14,6 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   presets file find their workspace folder through the kit's `Workspace`
   service. No command, setting or view changed. The VS Code floor stays at
   1.138, which is also what the kit requires.
+
+  **The bundle grows by 1,159 bytes (167,814 → 168,973), and the growth is
+  accounted for.** Built against both kit versions and compared: the kit
+  adds 1,458 bytes — the `Workspace` service and its VS Code side (627),
+  `filterLogger` (475), and in the application runtime the service's
+  registration and 7.1.0's fix that stops hosted services already started
+  when activation ends early (356). This extension's own code shrinks by
+  299 bytes, 330 of them the log filter it had written itself. `KIT_VERSION`
+  now reads `7.1.0`. The regex worker and both webview scripts are
+  byte-for-byte what 0.7.0 shipped.
 
 ## [0.7.0] - 2026-09-18
 
@@ -352,7 +364,8 @@ First release.
 - Tools and History views in the activity bar.
 - Localised UI (English, Japanese).
 
-[Unreleased]: https://github.com/kkdev92/quick-utils/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/kkdev92/quick-utils/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/kkdev92/quick-utils/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/kkdev92/quick-utils/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/kkdev92/quick-utils/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/kkdev92/quick-utils/compare/v0.4.0...v0.5.0
