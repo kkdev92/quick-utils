@@ -21,6 +21,7 @@ tsconfig.json
 eslint.config.mjs
 vitest.config.mts
 package-lock.json
+osv-scanner.toml
 
 # Environment and secrets — never ship these, whatever else changes here
 .env
