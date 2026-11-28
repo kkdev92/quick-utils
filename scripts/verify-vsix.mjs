@@ -8,7 +8,7 @@
  * 2. Nothing that must not ship is present (sources, tests, scripts,
  *    node_modules, source maps, the local `.env`).
  * 3. The bundles pull in no networking module, which is what makes the
- *    "no network requests" claim in README/SECURITY checkable rather than
+ *    "no network requests" claim in README/PROJECT_GUIDE checkable rather than
  *    asserted.
  * 4. The packaged regex worker actually works: a normal pattern returns the
  *    matches it should, and a catastrophically backtracking one is killed by

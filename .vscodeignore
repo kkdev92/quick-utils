@@ -33,6 +33,8 @@ package-lock.json
 # here: the MIT licence of the code bundled into dist/ requires its notice to
 # travel with the VSIX.
 CONTRIBUTING.md
+PROJECT_GUIDE.md
+AGENTS.md
 SECURITY.md
 CODE_OF_CONDUCT.md
 sample.md
